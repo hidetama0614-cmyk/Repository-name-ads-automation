@@ -136,6 +136,7 @@ def _format_slack_message(analysis: dict, today: str) -> str:
             icon = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
             kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
             lines.append(f"{icon} *{i}. {kind}：「{item['text']}」*")
+            lines.append(f"📁 {item.get('campaign', '-')} ＞ {item.get('ad_group', '-')}")
             lines.append(f"課題：{item.get('issue', '-')}")
             lines.append(f"▶ 次にやること：{item.get('next_action', '-')}")
             lines.append("")
@@ -149,6 +150,7 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         for item in winning_items:
             kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
             lines.append(f"*{kind}：「{item['text']}」*（{item.get('appeal_axis', '-')}）")
+            lines.append(f"📁 {item.get('campaign', '-')} ＞ {item.get('ad_group', '-')}")
             lines.append(f"→ {item.get('reason', '-')}")
             lines.append(f"▶ 次にやること：{item.get('next_action', '-')}")
             lines.append("")
@@ -162,6 +164,7 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         for i, item in enumerate(new_ads, 1):
             kind = "見出し" if item.get("type") == "HEADLINE" else "説明文"
             lines.append(f"*{i}. 【{kind}】「{item.get('text', '-')}」*（{item.get('appeal_axis', '-')}）")
+            lines.append(f"📁 追加先：{item.get('target_campaign', '-')} ＞ {item.get('target_ad_group', '-')}")
             lines.append(f"理由：{item.get('reason', '-')}")
             lines.append("")
 
