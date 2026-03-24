@@ -4,8 +4,9 @@ creative_report.py — 広告クリエイティブの週次レポートを生成
 処理の流れ:
     1. Google Ads API から広告アセット実績を取得
     2. 生データをスプレッドシートに保存
-    3. creative-analyst エージェントのプロンプトで Claude API を呼び出し → 分析
-    4. 分析結果をスプレッドシートに追記 ＋ Slack に通知
+    3. creative-analyst エージェントのプロンプトで Claude API を呼び出し → 分析（JSON）
+    4. 分析結果を専用スプレッドシートに行単位で追記
+    5. Slack に整形済みメッセージを通知
 """
 
 import os
@@ -36,15 +37,15 @@ ads_credentials = {
 }
 customer_id = os.getenv("GOOGLE_ADS_CUSTOMER_ID") or config["customer_id"]
 
+IMPORTANCE_ICON = {"高": "🔴", "中": "🟡", "低": "🟢"}
+DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
+
 
 # ---------------------------------------------------------------------------
 # 1. エージェントプロンプトの読み込み
 # ---------------------------------------------------------------------------
 
 def _load_agent_prompt(agent_name: str) -> str:
-    """claude/agents/{agent_name}.md からシステムプロンプトを読み込む。
-    frontmatter (--- ... ---) は除去して本文のみ返す。
-    """
     path = Path(__file__).parent / "claude" / "agents" / f"{agent_name}.md"
     content = path.read_text(encoding="utf-8")
     content = re.sub(r"^---.*?---\s*", "", content, flags=re.DOTALL)
@@ -65,7 +66,6 @@ PERFORMANCE_LABEL_MAP = {
 
 
 def _format_for_claude(rows: list[dict]) -> str:
-    """アセット実績データを Claude に渡す Markdown テーブルに整形する。"""
     lines = [
         "以下はGoogle検索広告の広告アセット（見出し・説明文）の直近30日間の実績データです。分析をお願いします。\n",
         "| 種別 | テキスト | パフォーマンスラベル | 表示回数 | クリック数 | 費用(円) | CTR(%) | CV数 | キャンペーン | 広告グループ |",
@@ -82,26 +82,85 @@ def _format_for_claude(rows: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 3. Claude API 呼び出し
+# 3. Claude API 呼び出し → JSON パース
 # ---------------------------------------------------------------------------
 
-def analyze_with_claude(rows: list[dict]) -> str:
-    """creative-analyst エージェントを使って Claude に分析させる。"""
+def analyze_with_claude(rows: list[dict]) -> dict:
+    """creative-analyst エージェントで分析し、JSONとして返す。"""
     system_prompt = _load_agent_prompt("creative-analyst")
     user_message  = _format_for_claude(rows)
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2048,
+        max_tokens=4096,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
-    return message.content[0].text
+    raw_text = message.content[0].text
+
+    # JSON パース（コードブロック記法を除去して再試行）
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw_text).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            return {"_raw": raw_text, "stop": [], "winning": [], "test_hypotheses": []}
 
 
 # ---------------------------------------------------------------------------
-# 4. スプレッドシート書き込み
+# 4. Slack メッセージ整形
+# ---------------------------------------------------------------------------
+
+def _format_slack_message(analysis: dict, today: str) -> str:
+    lines = [f"*📊 クリエイティブ週次レポート（{today}）*\n"]
+
+    # 停止推奨
+    stop_items = analysis.get("stop", [])
+    if stop_items:
+        lines.append(f"*🚨 停止推奨クリエイティブ（{len(stop_items)}件）*")
+        lines.append(DIVIDER)
+        for item in stop_items:
+            icon = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
+            kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
+            lines.append(f"{icon} *[{item.get('importance', '-')}] {kind}：「{item['text']}」*")
+            lines.append(f"　📌 課題：{item.get('issue', '-')}")
+            lines.append(f"　🔍 要因：{item.get('hypothesis', '-')}")
+            lines.append(f"　✏️ 改善案：「{item.get('suggestion', '-')}」")
+            lines.append("")
+
+    # 当たっている訴求軸
+    winning_items = analysis.get("winning", [])
+    if winning_items:
+        lines.append(f"*✅ 当たっている訴求軸（{len(winning_items)}件）*")
+        lines.append(DIVIDER)
+        for item in winning_items:
+            kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
+            lines.append(f"• *{kind}：「{item['text']}」*（訴求軸：{item.get('appeal_axis', '-')}）")
+            lines.append(f"　→ {item.get('psychological_background', '-')}")
+            lines.append("")
+
+    # 次にテストすべき仮説
+    hypotheses = analysis.get("test_hypotheses", [])
+    if hypotheses:
+        lines.append(f"*💡 次にテストすべき仮説（{len(hypotheses)}件）*")
+        lines.append(DIVIDER)
+        for i, item in enumerate(hypotheses, 1):
+            lines.append(f"{i}. {item.get('hypothesis', '-')}")
+            lines.append(f"　→ 広告文案：「{item.get('ad_copy_example', '-')}」")
+            lines.append("")
+
+    # フォールバック（JSON解析失敗時）
+    if "_raw" in analysis:
+        lines.append(analysis["_raw"])
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# 5. スプレッドシート書き込み
 # ---------------------------------------------------------------------------
 
 def _get_or_create_worksheet(sh, title: str, rows: int = 1000, cols: int = 15):
@@ -117,26 +176,23 @@ def write_raw_sheet(sh, rows: list[dict], config: dict):
     """生データをスプレッドシートの専用タブに上書き保存する。"""
     tab_name = config.get("sheet", {}).get("creative_tab", "クリエイティブ実績")
     ws = _get_or_create_worksheet(sh, tab_name)
-
     header = [
         "種別", "テキスト", "パフォーマンスラベル",
         "表示回数", "クリック数", "費用(円)", "CTR(%)", "CV数",
         "広告ID", "キャンペーン", "広告グループ",
     ]
     data = [header] + [
-        [
-            r["field_type"], r["text"], r["performance_label"],
-            r["impressions"], r["clicks"], r["cost"], r["ctr"],
-            r["conversions"], r["ad_id"], r["campaign"], r["ad_group"],
-        ]
+        [r["field_type"], r["text"], r["performance_label"],
+         r["impressions"], r["clicks"], r["cost"], r["ctr"],
+         r["conversions"], r["ad_id"], r["campaign"], r["ad_group"]]
         for r in rows
     ]
     ws.update(data, "A1")
     print(f"  → 生データ {len(rows)}件 → シート「{tab_name}」に保存")
 
 
-def write_analysis_sheet(sh, analysis_text: str, config: dict):
-    """Claude の分析テキストをスプレッドシートの専用タブに日付付きで追記する。"""
+def write_analysis_sheet(sh, analysis: dict, config: dict):
+    """Claude の分析結果（JSON）をサマリーシートに日付付きで追記する。"""
     tab_name = config.get("sheet", {}).get("creative_analysis_tab", "クリエイティブ分析")
     today = date.today().strftime("%Y-%m-%d")
 
@@ -144,42 +200,95 @@ def write_analysis_sheet(sh, analysis_text: str, config: dict):
         ws = sh.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=tab_name, rows=2000, cols=3)
-        ws.append_row(["日付", "分析結果"])
+        ws.append_row(["日付", "分析結果（JSON）"])
         ws.freeze(rows=1)
 
-    ws.append_row([today, analysis_text])
+    ws.append_row([today, json.dumps(analysis, ensure_ascii=False)])
     print(f"  → 分析結果 → シート「{tab_name}」に追記")
 
 
+def write_detail_spreadsheet(gc, analysis: dict, config: dict):
+    """分析結果を行単位で専用スプレッドシートに追記する。"""
+    log_spreadsheet_id = config.get("creative_log_spreadsheet_id", "")
+    if not log_spreadsheet_id:
+        print("  → creative_log_spreadsheet_id 未設定のためスキップ")
+        return
+
+    sh = gc.open_by_key(log_spreadsheet_id)
+    today = date.today().strftime("%Y-%m-%d")
+    tab_name = "クリエイティブ分析ログ"
+
+    try:
+        ws = sh.worksheet(tab_name)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_name, rows=5000, cols=8)
+        ws.append_row(["日付", "分析区分", "重要度", "種別", "テキスト", "課題", "要因仮説", "改善提案/訴求軸"])
+        ws.freeze(rows=1)
+
+    rows_to_append = []
+
+    for item in analysis.get("stop", []):
+        rows_to_append.append([
+            today, "停止推奨",
+            item.get("importance", "-"),
+            item.get("field_type", "-"),
+            item.get("text", "-"),
+            item.get("issue", "-"),
+            item.get("hypothesis", "-"),
+            item.get("suggestion", "-"),
+        ])
+
+    for item in analysis.get("winning", []):
+        rows_to_append.append([
+            today, "継続強化",
+            "高",
+            item.get("field_type", "-"),
+            item.get("text", "-"),
+            item.get("appeal_axis", "-"),
+            item.get("psychological_background", "-"),
+            "-",
+        ])
+
+    for item in analysis.get("test_hypotheses", []):
+        rows_to_append.append([
+            today, "テスト仮説",
+            "-", "-",
+            item.get("ad_copy_example", "-"),
+            item.get("hypothesis", "-"),
+            "-", "-",
+        ])
+
+    if rows_to_append:
+        ws.append_rows(rows_to_append)
+
+    print(f"  → 分析ログ {len(rows_to_append)}件 → 専用スプレッドシートに追記")
+
+
 # ---------------------------------------------------------------------------
-# 5. Slack 通知
+# 6. Slack 通知
 # ---------------------------------------------------------------------------
 
-def notify_slack(analysis_text: str, config: dict):
-    """分析結果を Slack に通知する。"""
+def notify_slack(analysis: dict, config: dict):
+    """分析結果を整形して Slack に通知する。"""
     webhook_url = os.getenv("SLACK_WEBHOOK_URL") or config.get("slack_webhook_url", "")
     if not webhook_url:
         return
 
     today = date.today().strftime("%Y-%m-%d")
-    payload = {
-        "text": f"*📝 クリエイティブ週次レポート（{today}）*\n\n{analysis_text}"
-    }
-    requests.post(webhook_url, json=payload, timeout=10)
+    message = _format_slack_message(analysis, today)
+    requests.post(webhook_url, json={"text": message}, timeout=10)
     print("  → Slack に通知完了")
 
 
 # ---------------------------------------------------------------------------
-# 6. エントリーポイント
+# 7. エントリーポイント
 # ---------------------------------------------------------------------------
 
 def main():
     print("=== クリエイティブ週次レポート ===")
 
-    # Google Ads クライアント初期化
     ads_client = GoogleAdsClient.load_from_dict(ads_credentials)
 
-    # アセット実績データ取得
     print(f"広告アセットデータを取得中（{config['date_range']}）...")
     rows = fetch_ad_asset_performance(ads_client, customer_id, config)
     print(f"  → {len(rows)}件取得")
@@ -188,25 +297,20 @@ def main():
         print("対象データがありません。処理を終了します。")
         return
 
-    # スプレッドシート接続
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(config["spreadsheet_id"])
 
-    # 生データをシートに保存
     write_raw_sheet(sh, rows, config)
 
-    # Claude で分析
     print("Claude（creative-analyst）で分析中...")
-    analysis_text = analyze_with_claude(rows)
+    analysis = analyze_with_claude(rows)
     print("  → 分析完了")
 
-    # 分析結果をシートに追記
-    write_analysis_sheet(sh, analysis_text, config)
-
-    # Slack 通知
-    notify_slack(analysis_text, config)
+    write_analysis_sheet(sh, analysis, config)
+    write_detail_spreadsheet(gc, analysis, config)
+    notify_slack(analysis, config)
 
     print("\n完了しました！")
     print(f"  スプレッドシート: https://docs.google.com/spreadsheets/d/{config['spreadsheet_id']}")
