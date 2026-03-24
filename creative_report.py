@@ -107,7 +107,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
-            return {"_raw": raw_text, "stop": [], "winning": [], "test_hypotheses": []}
+            return {"_raw": raw_text, "stop": [], "winning": [], "new_ads": []}
 
 
 # ---------------------------------------------------------------------------
@@ -115,41 +115,54 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 def _format_slack_message(analysis: dict, today: str) -> str:
-    lines = [f"*📊 クリエイティブ週次レポート（{today}）*\n"]
+    lines = [f"*📊 クリエイティブ週次レポート（{today}）*"]
 
-    # 停止推奨
+    # 今週の結論
+    conclusion = analysis.get("conclusion", "")
+    if conclusion:
+        lines.append("")
+        lines.append(f"*【今週の結論】*\n{conclusion}")
+
+    # 停止推奨（重要度順にソート）
     stop_items = analysis.get("stop", [])
     if stop_items:
-        lines.append(f"*🚨 停止推奨クリエイティブ（{len(stop_items)}件）*")
+        priority_order = {"高": 0, "中": 1, "低": 2}
+        stop_items = sorted(stop_items, key=lambda x: priority_order.get(x.get("importance", "低"), 2))
+        lines.append("")
         lines.append(DIVIDER)
-        for item in stop_items:
+        lines.append(f"*🚨 停止・修正すべきクリエイティブ（{len(stop_items)}件）*")
+        lines.append(DIVIDER)
+        for i, item in enumerate(stop_items, 1):
             icon = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
             kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
-            lines.append(f"{icon} *[{item.get('importance', '-')}] {kind}：「{item['text']}」*")
-            lines.append(f"　📌 課題：{item.get('issue', '-')}")
-            lines.append(f"　🔍 要因：{item.get('hypothesis', '-')}")
-            lines.append(f"　✏️ 改善案：「{item.get('suggestion', '-')}」")
+            lines.append(f"{icon} *{i}. {kind}：「{item['text']}」*")
+            lines.append(f"課題：{item.get('issue', '-')}")
+            lines.append(f"▶ 次にやること：{item.get('next_action', '-')}")
             lines.append("")
 
-    # 当たっている訴求軸
+    # 勝ちパターン
     winning_items = analysis.get("winning", [])
     if winning_items:
-        lines.append(f"*✅ 当たっている訴求軸（{len(winning_items)}件）*")
+        lines.append(DIVIDER)
+        lines.append(f"*✅ 勝ちパターン（{len(winning_items)}件）*")
         lines.append(DIVIDER)
         for item in winning_items:
             kind = "見出し" if item.get("field_type") == "HEADLINE" else "説明文"
-            lines.append(f"• *{kind}：「{item['text']}」*（訴求軸：{item.get('appeal_axis', '-')}）")
-            lines.append(f"　→ {item.get('psychological_background', '-')}")
+            lines.append(f"*{kind}：「{item['text']}」*（{item.get('appeal_axis', '-')}）")
+            lines.append(f"→ {item.get('reason', '-')}")
+            lines.append(f"▶ 次にやること：{item.get('next_action', '-')}")
             lines.append("")
 
-    # 次にテストすべき仮説
-    hypotheses = analysis.get("test_hypotheses", [])
-    if hypotheses:
-        lines.append(f"*💡 次にテストすべき仮説（{len(hypotheses)}件）*")
+    # 新規広告案
+    new_ads = analysis.get("new_ads", [])
+    if new_ads:
         lines.append(DIVIDER)
-        for i, item in enumerate(hypotheses, 1):
-            lines.append(f"{i}. {item.get('hypothesis', '-')}")
-            lines.append(f"　→ 広告文案：「{item.get('ad_copy_example', '-')}」")
+        lines.append(f"*💡 今週追加する新規広告案（{len(new_ads)}件）*")
+        lines.append(DIVIDER)
+        for i, item in enumerate(new_ads, 1):
+            kind = "見出し" if item.get("type") == "HEADLINE" else "説明文"
+            lines.append(f"*{i}. 【{kind}】「{item.get('text', '-')}」*（{item.get('appeal_axis', '-')}）")
+            lines.append(f"理由：{item.get('reason', '-')}")
             lines.append("")
 
     # フォールバック（JSON解析失敗時）
@@ -222,9 +235,10 @@ def write_detail_spreadsheet(gc, analysis: dict, config: dict):
         ws = sh.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=tab_name, rows=5000, cols=8)
-        ws.append_row(["日付", "分析区分", "重要度", "種別", "テキスト", "課題", "要因仮説", "改善提案/訴求軸"])
+        ws.append_row(["日付", "分析区分", "重要度", "種別", "テキスト", "課題/訴求軸/理由", "次にやること", "結論"])
         ws.freeze(rows=1)
 
+    conclusion = analysis.get("conclusion", "")
     rows_to_append = []
 
     for item in analysis.get("stop", []):
@@ -234,8 +248,8 @@ def write_detail_spreadsheet(gc, analysis: dict, config: dict):
             item.get("field_type", "-"),
             item.get("text", "-"),
             item.get("issue", "-"),
-            item.get("hypothesis", "-"),
-            item.get("suggestion", "-"),
+            item.get("next_action", "-"),
+            conclusion,
         ])
 
     for item in analysis.get("winning", []):
@@ -245,17 +259,19 @@ def write_detail_spreadsheet(gc, analysis: dict, config: dict):
             item.get("field_type", "-"),
             item.get("text", "-"),
             item.get("appeal_axis", "-"),
-            item.get("psychological_background", "-"),
-            "-",
+            item.get("next_action", "-"),
+            conclusion,
         ])
 
-    for item in analysis.get("test_hypotheses", []):
+    for item in analysis.get("new_ads", []):
         rows_to_append.append([
-            today, "テスト仮説",
-            "-", "-",
-            item.get("ad_copy_example", "-"),
-            item.get("hypothesis", "-"),
-            "-", "-",
+            today, "新規広告案",
+            "-",
+            item.get("type", "-"),
+            item.get("text", "-"),
+            item.get("reason", "-"),
+            "-",
+            conclusion,
         ])
 
     if rows_to_append:
