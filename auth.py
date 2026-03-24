@@ -1,0 +1,13 @@
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+SCOPES = ["https://www.googleapis.com/auth/adwords"]
+
+flow = InstalledAppFlow.from_client_secrets_file(
+    "client_secret.json",
+    scopes=SCOPES
+)
+
+credentials = flow.run_local_server(port=8888)
+
+print("=== 以下をメモしてください ===")
+print(f"refresh_token: {credentials.refresh_token}")

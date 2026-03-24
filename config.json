@@ -1,0 +1,21 @@
+{
+  "spreadsheet_id": "1u2hsFMpS0DMQZitEqET2imRPqTJbDUFMkZJyzcvuoJI",
+  "customer_id": "3746506642",
+  "date_range": "LAST_30_DAYS",
+  "sheet": {
+    "campaign_tab": "キャンペーン",
+    "summary_tab": "サマリー",
+    "report_tab": "分析レポート",
+    "creative_tab": "クリエイティブ実績",
+    "creative_analysis_tab": "クリエイティブ分析"
+  },
+  "analysis": {
+    "target_cpa": 10000,
+    "wasted_cost_min": 5000,
+    "ctr_alert_threshold": 1.0,
+    "ctr_watch_threshold": 3.0,
+    "growth_cpa_ratio": 0.7,
+    "growth_min_clicks": 10
+  },
+  "slack_webhook_url": ""
+}

@@ -1,0 +1,16 @@
+# 機密情報（絶対にコミットしない）
+.env
+service_account.json
+client_secret.json.json
+refresh_token.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ログ
+*.log
+
+# Claude メモリ（ローカル専用）
+.claude/
