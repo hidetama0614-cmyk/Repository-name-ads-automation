@@ -1,12 +1,17 @@
 """
-creative_report.py — 広告クリエイティブの週次レポートを生成・通知するエントリーポイント
+pmax_report.py — P-MAX広告クリエイティブの週次レポートを生成・通知するエントリーポイント
 
 処理の流れ:
-    1. Google Ads API から広告アセット実績を取得
+    1. Google Ads API から P-MAX アセット実績を取得
     2. 生データをスプレッドシートに保存
-    3. creative-analyst エージェントのプロンプトで Claude API を呼び出し → 分析（JSON）
+    3. pmax-analyst エージェントのプロンプトで Claude API を呼び出し → 分析（JSON）
     4. 分析結果を専用スプレッドシートに行単位で追記
     5. Slack に整形済みメッセージを通知
+
+初回実行時:
+    config.json の pmax_log_spreadsheet_id が空の場合、
+    Google Drive の共有フォルダに新規スプレッドシートを自動作成します。
+    作成後に表示されるスプレッドシートIDを config.json に設定してください。
 """
 
 import os
@@ -21,7 +26,7 @@ from google.oauth2.service_account import Credentials
 from google.ads.googleads.client import GoogleAdsClient
 import anthropic
 
-from fetch_ad_creatives import fetch_ad_asset_performance
+from fetch_pmax_assets import fetch_pmax_asset_performance
 
 load_dotenv()
 
@@ -38,7 +43,11 @@ ads_credentials = {
 customer_id = os.getenv("GOOGLE_ADS_CUSTOMER_ID") or config["customer_id"]
 
 IMPORTANCE_ICON = {"高": "🔴", "中": "🟡", "低": "🟢"}
+LABEL_ICON      = {"BEST": "◎", "GOOD": "○", "LOW": "×", "LEARNING": "△"}
 DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
+
+DRIVE_FOLDER_ID = config.get("drive_folder_id", "")
+PMAX_SPREADSHEET_TITLE = "P-MAX クリエイティブレポート"
 
 
 # ---------------------------------------------------------------------------
@@ -64,19 +73,26 @@ PERFORMANCE_LABEL_MAP = {
     "UNKNOWN":  "-",
 }
 
+FIELD_TYPE_MAP = {
+    "HEADLINE":      "見出し",
+    "LONG_HEADLINE": "ロング見出し",
+    "DESCRIPTION":   "説明文",
+}
+
 
 def _format_for_claude(rows: list[dict]) -> str:
     lines = [
-        "以下はGoogle検索広告の広告アセット（見出し・説明文）の直近30日間の実績データです。分析をお願いします。\n",
-        "| 種別 | テキスト | パフォーマンスラベル | 表示回数 | クリック数 | 費用(円) | CTR(%) | CV数 | キャンペーン | 広告グループ |",
+        "以下はGoogle P-MAX広告のアセット（見出し・ロング見出し・説明文）の直近30日間の実績データです。分析をお願いします。\n",
+        "| 種別 | テキスト | パフォーマンスラベル | 表示回数 | クリック数 | 費用(円) | CTR(%) | CV数 | キャンペーン | アセットグループ |",
         "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- |",
     ]
     for r in rows:
-        label = PERFORMANCE_LABEL_MAP.get(r["performance_label"], r["performance_label"])
+        label     = PERFORMANCE_LABEL_MAP.get(r["performance_label"], r["performance_label"])
+        type_name = FIELD_TYPE_MAP.get(r["field_type"], r["field_type"])
         lines.append(
-            f"| {r['field_type']} | {r['text']} | {label} "
+            f"| {type_name} | {r['text']} | {label} "
             f"| {r['impressions']:,} | {r['clicks']:,} | {r['cost']:,} "
-            f"| {r['ctr']} | {r['conversions']} | {r['campaign']} | {r['ad_group']} |"
+            f"| {r['ctr']} | {r['conversions']} | {r['campaign']} | {r['asset_group']} |"
         )
     return "\n".join(lines)
 
@@ -86,8 +102,8 @@ def _format_for_claude(rows: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def analyze_with_claude(rows: list[dict]) -> dict:
-    """creative-analyst エージェントで分析し、JSONとして返す。"""
-    system_prompt = _load_agent_prompt("creative-analyst")
+    """pmax-analyst エージェントで分析し、JSONとして返す。"""
+    system_prompt = _load_agent_prompt("pmax-analyst")
     user_message  = _format_for_claude(rows)
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -117,30 +133,30 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 def _format_slack_message(analysis: dict, today: str) -> str:
-    lines = [f"*📊 【検索広告】クリエイティブ週次レポート（{today}）*"]
+    lines = [f"*📊 【P-MAX】クリエイティブ週次レポート（{today}）*"]
 
-    # 今週の結論
     conclusion = analysis.get("conclusion", "")
     if conclusion:
         lines.append("")
         lines.append(f"*【今週の結論】*\n{conclusion}")
 
-    # 停止・修正指示（重要度順にソート）
+    # 停止・置き換え指示
     stop_items = analysis.get("stop", [])
     if stop_items:
         priority_order = {"高": 0, "中": 1, "低": 2}
         stop_items = sorted(stop_items, key=lambda x: priority_order.get(x.get("importance", "低"), 2))
         lines.append("")
         lines.append(DIVIDER)
-        lines.append(f"*🚨 停止・修正指示（{len(stop_items)}件）*")
+        lines.append(f"*🚨 停止・置き換え指示（{len(stop_items)}件）*")
         lines.append(DIVIDER)
         for i, item in enumerate(stop_items, 1):
-            icon = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
-            field = item.get("field_type", "-")
-            action = item.get("action_type", "-")
-            lines.append(f"{icon} *[{item.get('importance', '-')}] {i}. {field} — {action}*")
+            icon       = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
+            label_icon = LABEL_ICON.get(item.get("performance_label", "LOW"), "×")
+            field      = FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-"))
+            action     = item.get("action_type", "-")
+            lines.append(f"{icon} *[{item.get('importance', '-')}] {i}. {field} — {action}* （ラベル: {label_icon}）")
             lines.append(f"・キャンペーン：{item.get('campaign', '-')}")
-            lines.append(f"・広告グループ：{item.get('ad_group', '-')}")
+            lines.append(f"・アセットグループ：{item.get('asset_group', '-')}")
             lines.append(f"・テキスト：「{item.get('text', '-')}」")
             lines.append(f"・課題：{item.get('issue', '-')}")
             lines.append(f"・操作：{item.get('operation', '-')}")
@@ -154,10 +170,10 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         lines.append(f"*✅ 勝ちパターン — 継続強化（{len(winning_items)}件）*")
         lines.append(DIVIDER)
         for i, item in enumerate(winning_items, 1):
-            field = item.get("field_type", "-")
-            lines.append(f"*{i}. {field} — 継続強化*")
+            field = FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-"))
+            lines.append(f"*{i}. {field} — 継続強化*（ラベル: ◎）")
             lines.append(f"・キャンペーン：{item.get('campaign', '-')}")
-            lines.append(f"・広告グループ：{item.get('ad_group', '-')}")
+            lines.append(f"・アセットグループ：{item.get('asset_group', '-')}")
             lines.append(f"・テキスト：「{item.get('text', '-')}」")
             lines.append(f"・訴求軸：{item.get('appeal_axis', '-')}")
             lines.append(f"・理由：{item.get('reason', '-')}")
@@ -171,17 +187,16 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         lines.append(f"*💡 新規追加指示（{len(new_ads)}件）*")
         lines.append(DIVIDER)
         for i, item in enumerate(new_ads, 1):
-            field = item.get("type", "-")
+            field = FIELD_TYPE_MAP.get(item.get("type", "-"), item.get("type", "-"))
             lines.append(f"*{i}. {field} — 新規追加*")
             lines.append(f"・追加先キャンペーン：{item.get('target_campaign', '-')}")
-            lines.append(f"・追加先広告グループ：{item.get('target_ad_group', '-')}")
+            lines.append(f"・追加先アセットグループ：{item.get('target_asset_group', '-')}")
             lines.append(f"・テキスト：「{item.get('text', '-')}」")
             lines.append(f"・訴求軸：{item.get('appeal_axis', '-')}")
             lines.append(f"・理由：{item.get('reason', '-')}")
             lines.append(f"・操作：{item.get('operation', '-')}")
             lines.append("")
 
-    # フォールバック（JSON解析失敗時）
     if "_raw" in analysis:
         lines.append(analysis["_raw"])
 
@@ -189,10 +204,34 @@ def _format_slack_message(analysis: dict, today: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 5. スプレッドシート書き込み
+# 5. スプレッドシート作成・書き込み
 # ---------------------------------------------------------------------------
 
-def _get_or_create_worksheet(sh, title: str, rows: int = 1000, cols: int = 15):
+def _get_or_create_spreadsheet(gc) -> tuple:
+    """P-MAX専用スプレッドシートを取得または新規作成する。(sh, spreadsheet_id) を返す。"""
+    spreadsheet_id = config.get("pmax_log_spreadsheet_id", "")
+
+    if spreadsheet_id:
+        sh = gc.open_by_key(spreadsheet_id)
+        return sh, spreadsheet_id
+
+    # 新規作成（Driveフォルダに配置）
+    folder_id = config.get("drive_folder_id", "")
+    if folder_id:
+        sh = gc.create(PMAX_SPREADSHEET_TITLE, folder_id=folder_id)
+    else:
+        sh = gc.create(PMAX_SPREADSHEET_TITLE)
+
+    new_id = sh.id
+    print(f"\n★ 新規スプレッドシートを作成しました")
+    print(f"  ID: {new_id}")
+    print(f"  URL: https://docs.google.com/spreadsheets/d/{new_id}")
+    print(f"  → config.json の pmax_log_spreadsheet_id にこのIDを設定してください\n")
+
+    return sh, new_id
+
+
+def _get_or_create_worksheet(sh, title: str, rows: int = 2000, cols: int = 15):
     try:
         ws = sh.worksheet(title)
         ws.clear()
@@ -201,29 +240,37 @@ def _get_or_create_worksheet(sh, title: str, rows: int = 1000, cols: int = 15):
     return ws
 
 
-def write_raw_sheet(sh, rows: list[dict], config: dict):
-    """生データをスプレッドシートの専用タブに上書き保存する。"""
-    tab_name = config.get("sheet", {}).get("creative_tab", "クリエイティブ実績")
-    ws = _get_or_create_worksheet(sh, tab_name)
+def write_raw_sheet(sh, rows: list[dict]):
+    """生データを「P-MAXアセット実績」タブに上書き保存する。"""
+    ws = _get_or_create_worksheet(sh, "P-MAXアセット実績")
     header = [
         "種別", "テキスト", "パフォーマンスラベル",
         "表示回数", "クリック数", "費用(円)", "CTR(%)", "CV数",
-        "広告ID", "キャンペーン", "広告グループ",
+        "キャンペーン", "アセットグループ",
     ]
     data = [header] + [
-        [r["field_type"], r["text"], r["performance_label"],
-         r["impressions"], r["clicks"], r["cost"], r["ctr"],
-         r["conversions"], r["ad_id"], r["campaign"], r["ad_group"]]
+        [
+            FIELD_TYPE_MAP.get(r["field_type"], r["field_type"]),
+            r["text"],
+            r["performance_label"],
+            r["impressions"],
+            r["clicks"],
+            r["cost"],
+            r["ctr"],
+            r["conversions"],
+            r["campaign"],
+            r["asset_group"],
+        ]
         for r in rows
     ]
     ws.update(data, "A1")
-    print(f"  → 生データ {len(rows)}件 → シート「{tab_name}」に保存")
+    print(f"  → 生データ {len(rows)}件 → シート「P-MAXアセット実績」に保存")
 
 
-def write_analysis_sheet(sh, analysis: dict, config: dict):
-    """Claude の分析結果（JSON）をサマリーシートに日付付きで追記する。"""
-    tab_name = config.get("sheet", {}).get("creative_analysis_tab", "クリエイティブ分析")
-    today = date.today().strftime("%Y-%m-%d")
+def write_analysis_sheet(sh, analysis: dict):
+    """Claude の分析結果（JSON）を「P-MAX分析」タブに日付付きで追記する。"""
+    tab_name = "P-MAX分析"
+    today    = date.today().strftime("%Y-%m-%d")
 
     try:
         ws = sh.worksheet(tab_name)
@@ -236,35 +283,33 @@ def write_analysis_sheet(sh, analysis: dict, config: dict):
     print(f"  → 分析結果 → シート「{tab_name}」に追記")
 
 
-def write_detail_spreadsheet(gc, analysis: dict, config: dict):
-    """分析結果を行単位で専用スプレッドシートに追記する。"""
-    log_spreadsheet_id = config.get("creative_log_spreadsheet_id", "")
-    if not log_spreadsheet_id:
-        print("  → creative_log_spreadsheet_id 未設定のためスキップ")
-        return
-
-    sh = gc.open_by_key(log_spreadsheet_id)
-    today = date.today().strftime("%Y-%m-%d")
-    tab_name = "クリエイティブ分析ログ"
+def write_detail_sheet(sh, analysis: dict):
+    """分析結果を行単位で「P-MAX分析ログ」タブに追記する。"""
+    tab_name = "P-MAX分析ログ"
+    today    = date.today().strftime("%Y-%m-%d")
 
     try:
         ws = sh.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=tab_name, rows=5000, cols=8)
-        ws.append_row(["日付", "分析区分", "重要度", "種別", "テキスト", "課題/訴求軸/理由", "次にやること", "結論"])
+        ws = sh.add_worksheet(title=tab_name, rows=5000, cols=9)
+        ws.append_row([
+            "日付", "分析区分", "重要度", "種別", "テキスト",
+            "課題/訴求軸/理由", "次にやること/操作", "アセットグループ", "結論",
+        ])
         ws.freeze(rows=1)
 
-    conclusion = analysis.get("conclusion", "")
+    conclusion     = analysis.get("conclusion", "")
     rows_to_append = []
 
     for item in analysis.get("stop", []):
         rows_to_append.append([
-            today, "停止推奨",
+            today, "停止・置き換え推奨",
             item.get("importance", "-"),
-            item.get("field_type", "-"),
+            FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-")),
             item.get("text", "-"),
             item.get("issue", "-"),
-            item.get("next_action", "-"),
+            item.get("operation", "-"),
+            item.get("asset_group", "-"),
             conclusion,
         ])
 
@@ -272,41 +317,43 @@ def write_detail_spreadsheet(gc, analysis: dict, config: dict):
         rows_to_append.append([
             today, "継続強化",
             "高",
-            item.get("field_type", "-"),
+            FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-")),
             item.get("text", "-"),
             item.get("appeal_axis", "-"),
             item.get("next_action", "-"),
+            item.get("asset_group", "-"),
             conclusion,
         ])
 
     for item in analysis.get("new_ads", []):
         rows_to_append.append([
-            today, "新規広告案",
+            today, "新規追加案",
             "-",
-            item.get("type", "-"),
+            FIELD_TYPE_MAP.get(item.get("type", "-"), item.get("type", "-")),
             item.get("text", "-"),
             item.get("reason", "-"),
-            "-",
+            item.get("operation", "-"),
+            item.get("target_asset_group", "-"),
             conclusion,
         ])
 
     if rows_to_append:
         ws.append_rows(rows_to_append)
 
-    print(f"  → 分析ログ {len(rows_to_append)}件 → 専用スプレッドシートに追記")
+    print(f"  → 分析ログ {len(rows_to_append)}件 → シート「{tab_name}」に追記")
 
 
 # ---------------------------------------------------------------------------
 # 6. Slack 通知
 # ---------------------------------------------------------------------------
 
-def notify_slack(analysis: dict, config: dict):
+def notify_slack(analysis: dict):
     """分析結果を整形して Slack に通知する。"""
     webhook_url = os.getenv("SLACK_WEBHOOK_URL") or config.get("slack_webhook_url", "")
     if not webhook_url:
         return
 
-    today = date.today().strftime("%Y-%m-%d")
+    today   = date.today().strftime("%Y-%m-%d")
     message = _format_slack_message(analysis, today)
     requests.post(webhook_url, json={"text": message}, timeout=10)
     print("  → Slack に通知完了")
@@ -317,35 +364,39 @@ def notify_slack(analysis: dict, config: dict):
 # ---------------------------------------------------------------------------
 
 def main():
-    print("=== クリエイティブ週次レポート ===")
+    print("=== P-MAX クリエイティブ週次レポート ===")
 
     ads_client = GoogleAdsClient.load_from_dict(ads_credentials)
 
-    print(f"広告アセットデータを取得中（{config['date_range']}）...")
-    rows = fetch_ad_asset_performance(ads_client, customer_id, config)
+    print(f"P-MAXアセットデータを取得中（{config['date_range']}）...")
+    rows = fetch_pmax_asset_performance(ads_client, customer_id, config)
     print(f"  → {len(rows)}件取得")
 
     if not rows:
         print("対象データがありません。処理を終了します。")
         return
 
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
     creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(config["spreadsheet_id"])
+    gc    = gspread.authorize(creds)
 
-    write_raw_sheet(sh, rows, config)
+    sh, spreadsheet_id = _get_or_create_spreadsheet(gc)
 
-    print("Claude（creative-analyst）で分析中...")
+    write_raw_sheet(sh, rows)
+
+    print("Claude（pmax-analyst）で分析中...")
     analysis = analyze_with_claude(rows)
     print("  → 分析完了")
 
-    write_analysis_sheet(sh, analysis, config)
-    write_detail_spreadsheet(gc, analysis, config)
-    notify_slack(analysis, config)
+    write_analysis_sheet(sh, analysis)
+    write_detail_sheet(sh, analysis)
+    notify_slack(analysis)
 
     print("\n完了しました！")
-    print(f"  スプレッドシート: https://docs.google.com/spreadsheets/d/{config['spreadsheet_id']}")
+    print(f"  スプレッドシート: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
 
 
 if __name__ == "__main__":
