@@ -122,25 +122,27 @@ def analyze_with_claude(rows: list[dict]) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 2回目：コードブロック除去してパース
-    cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw_text).strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
+    # 2回目：{ 〜 } の範囲を抽出してパース（最も堅牢な方法）
+    start = raw_text.find("{")
+    end   = raw_text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(raw_text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
 
     # 3回目：Claudeに再変換させる（レートリミット回避のため65秒待機）
     print("  → JSON形式ではないため65秒待機後に再変換中...")
     time.sleep(65)
     json_schema = """{
   "conclusion": "今週全体の結論（2〜3文）",
-  "stop": [{"text":"","field_type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","campaign":"","asset_group":"","importance":"高/中/低","action_type":"停止 or 修正","performance_label":"BEST/GOOD/LOW/LEARNING","issue":"","operation":"","improved_copy":""}],
+  "stop": [{"text":"","field_type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","campaign":"","asset_group":"","importance":"高/中/低","action_type":"停止 or 修正","issue":"","improved_copy":""}],
   "winning": [{"text":"","field_type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","campaign":"","asset_group":"","appeal_axis":"","reason":"","next_action":""}],
-  "new_ads": [{"type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","text":"","target_campaign":"","target_asset_group":"","appeal_axis":"","reason":"","operation":""}]
+  "new_ads": [{"type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","text":"","target_campaign":"","target_asset_group":"","appeal_axis":"","reason":""}]
 }"""
     retry = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=(
             "あなたはJSONフォーマッターです。"
             "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
@@ -152,11 +154,15 @@ def analyze_with_claude(rows: list[dict]) -> dict:
             f"## 変換対象の分析テキスト\n{raw_text}"
         )}],
     )
-    retry_text = re.sub(r"```(?:json)?\s*|\s*```", "", retry.content[0].text).strip()
-    try:
-        return json.loads(retry_text)
-    except json.JSONDecodeError:
-        return {"_raw": raw_text, "stop": [], "winning": [], "new_ads": []}
+    retry_raw = retry.content[0].text
+    rs = retry_raw.find("{")
+    re_ = retry_raw.rfind("}")
+    if rs != -1 and re_ > rs:
+        try:
+            return json.loads(retry_raw[rs:re_ + 1])
+        except json.JSONDecodeError:
+            pass
+    return {"_raw": raw_text, "stop": [], "winning": [], "new_ads": []}
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +232,14 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         if total_new > 3:
             lines.append(f"　_ほか {total_new - 3} 件 → 詳細はスプレッドシートを確認_")
             lines.append("")
+
+    # フォールバック（JSON解析失敗時）
+    if "_raw" in analysis and not analysis.get("stop") and not analysis.get("winning"):
+        spreadsheet_id = config.get("pmax_log_spreadsheet_id", "")
+        lines.append("")
+        lines.append("⚠️ 分析結果の整形に失敗しました。スプレッドシートで詳細を確認してください。")
+        if spreadsheet_id:
+            lines.append(f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
 
     return "\n".join(lines)
 
