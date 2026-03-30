@@ -12,6 +12,7 @@ creative_report.py — 広告クリエイティブの週次レポートを生成
 import os
 import re
 import json
+import time
 import requests
 from datetime import date
 from pathlib import Path
@@ -112,8 +113,15 @@ def analyze_with_claude(rows: list[dict]) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 3回目：Claudeに再変換させる
-    print("  → JSON形式ではないため再変換中...")
+    # 3回目：Claudeに再変換させる（レートリミット回避のため65秒待機）
+    print("  → JSON形式ではないため65秒待機後に再変換中...")
+    time.sleep(65)
+    json_schema = """{
+  "conclusion": "今週全体の結論（2〜3文）",
+  "stop": [{"text":"","field_type":"HEADLINE or DESCRIPTION","campaign":"","ad_group":"","importance":"高/中/低","action_type":"停止 or 修正","issue":"","operation":"","improved_copy":""}],
+  "winning": [{"text":"","field_type":"HEADLINE or DESCRIPTION","campaign":"","ad_group":"","appeal_axis":"","reason":"","next_action":""}],
+  "new_ads": [{"type":"HEADLINE or DESCRIPTION","text":"","target_campaign":"","target_ad_group":"","appeal_axis":"","reason":"","operation":""}]
+}"""
     retry = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4096,
@@ -124,7 +132,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
         ),
         messages=[{"role": "user", "content": (
             f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
-            f"## 必要なJSON形式\n{system_prompt}\n\n"
+            f"## 必要なJSON形式\n{json_schema}\n\n"
             f"## 変換対象の分析テキスト\n{raw_text}"
         )}],
     )
