@@ -171,38 +171,37 @@ def _format_slack_message(analysis: dict, today: str) -> str:
         lines.append("")
         lines.append(f"*【今週の結論】*\n{conclusion}")
 
-    # 停止・置き換え指示
+    # 停止・置き換え指示（上位5件のみ表示）
     stop_items = analysis.get("stop", [])
     if stop_items:
         priority_order = {"高": 0, "中": 1, "低": 2}
         stop_items = sorted(stop_items, key=lambda x: priority_order.get(x.get("importance", "低"), 2))
+        total_stop = len(stop_items)
         lines.append("")
         lines.append(DIVIDER)
-        lines.append(f"*🚨 停止・置き換え指示（{len(stop_items)}件）*")
+        lines.append(f"*🚨 停止・置き換え指示（{total_stop}件）*")
         lines.append(DIVIDER)
-        for i, item in enumerate(stop_items, 1):
-            icon       = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
-            label_icon = LABEL_ICON.get(item.get("performance_label", "LOW"), "×")
-            field      = FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-"))
-            action     = item.get("action_type", "-")
-            lines.append(f"{icon} *[{item.get('importance', '-')}] {i}. {field} — {action}* （ラベル: {label_icon}）")
-            lines.append(f"・キャンペーン：{item.get('campaign', '-')}")
-            lines.append(f"・アセットグループ：{item.get('asset_group', '-')}")
-            lines.append(f"・テキスト：「{item.get('text', '-')}」")
-            lines.append(f"・課題：{item.get('issue', '-')}")
-            lines.append(f"・操作：{item.get('operation', '-')}")
-            lines.append(f"・改善コピー：「{item.get('improved_copy', '-')}」")
+        for i, item in enumerate(stop_items[:5], 1):
+            icon  = IMPORTANCE_ICON.get(item.get("importance", "中"), "🟡")
+            field = FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-"))
+            lines.append(f"{icon} *{i}. 「{item.get('text', '-')}」*")
+            lines.append(f"　{field}｜{item.get('campaign', '-')} / {item.get('asset_group', '-')}")
+            lines.append(f"　課題：{item.get('issue', '-')}")
+            lines.append(f"　改善コピー：「{item.get('improved_copy', '-')}」")
+            lines.append("")
+        if total_stop > 5:
+            lines.append(f"　_ほか {total_stop - 5} 件 → 詳細はスプレッドシートを確認_")
             lines.append("")
 
-    # 勝ちパターン
+    # 勝ちパターン（上位3件）
     winning_items = analysis.get("winning", [])
     if winning_items:
         lines.append(DIVIDER)
         lines.append(f"*✅ 勝ちパターン — 継続強化（{len(winning_items)}件）*")
         lines.append(DIVIDER)
-        for i, item in enumerate(winning_items, 1):
+        for i, item in enumerate(winning_items[:3], 1):
             field = FIELD_TYPE_MAP.get(item.get("field_type", "-"), item.get("field_type", "-"))
-            lines.append(f"*{i}. {field} — 継続強化*（ラベル: ◎）")
+            lines.append(f"*{i}. {field} — 継続強化*")
             lines.append(f"・キャンペーン：{item.get('campaign', '-')}")
             lines.append(f"・アセットグループ：{item.get('asset_group', '-')}")
             lines.append(f"・テキスト：「{item.get('text', '-')}」")
@@ -214,22 +213,19 @@ def _format_slack_message(analysis: dict, today: str) -> str:
     # 新規追加指示
     new_ads = analysis.get("new_ads", [])
     if new_ads:
+        total_new = len(new_ads)
         lines.append(DIVIDER)
-        lines.append(f"*💡 新規追加指示（{len(new_ads)}件）*")
+        lines.append(f"*💡 新規追加指示（{total_new}件）*")
         lines.append(DIVIDER)
-        for i, item in enumerate(new_ads, 1):
+        for i, item in enumerate(new_ads[:3], 1):
             field = FIELD_TYPE_MAP.get(item.get("type", "-"), item.get("type", "-"))
-            lines.append(f"*{i}. {field} — 新規追加*")
-            lines.append(f"・追加先キャンペーン：{item.get('target_campaign', '-')}")
-            lines.append(f"・追加先アセットグループ：{item.get('target_asset_group', '-')}")
-            lines.append(f"・テキスト：「{item.get('text', '-')}」")
-            lines.append(f"・訴求軸：{item.get('appeal_axis', '-')}")
-            lines.append(f"・理由：{item.get('reason', '-')}")
-            lines.append(f"・操作：{item.get('operation', '-')}")
+            lines.append(f"*{i}. 「{item.get('text', '-')}」*")
+            lines.append(f"　{field}｜{item.get('target_campaign', '-')} / {item.get('target_asset_group', '-')}")
+            lines.append(f"　理由：{item.get('reason', '-')}")
             lines.append("")
-
-    if "_raw" in analysis:
-        lines.append(analysis["_raw"])
+        if total_new > 3:
+            lines.append(f"　_ほか {total_new - 3} 件 → 詳細はスプレッドシートを確認_")
+            lines.append("")
 
     return "\n".join(lines)
 
