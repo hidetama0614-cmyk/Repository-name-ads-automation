@@ -111,21 +111,44 @@ def analyze_with_claude(rows: list[dict]) -> dict:
         model="claude-sonnet-4-6",
         max_tokens=4096,
         system=system_prompt,
-        messages=[
-            {"role": "user", "content": user_message},
-            {"role": "assistant", "content": "{"},
-        ],
+        messages=[{"role": "user", "content": user_message}],
     )
-    raw_text = "{" + message.content[0].text
+    raw_text = message.content[0].text
 
+    # 1回目：そのままパース
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError:
-        cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw_text).strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            return {"_raw": raw_text, "stop": [], "winning": [], "new_ads": []}
+        pass
+
+    # 2回目：コードブロック除去してパース
+    cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw_text).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 3回目：Claudeに再変換させる
+    print("  → JSON形式ではないため再変換中...")
+    retry = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        system=(
+            "あなたはJSONフォーマッターです。"
+            "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
+            "前置き・説明・コードブロック記法は一切含めないでください。"
+        ),
+        messages=[{"role": "user", "content": (
+            f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
+            f"## 必要なJSON形式\n{system_prompt}\n\n"
+            f"## 変換対象の分析テキスト\n{raw_text}"
+        )}],
+    )
+    retry_text = re.sub(r"```(?:json)?\s*|\s*```", "", retry.content[0].text).strip()
+    try:
+        return json.loads(retry_text)
+    except json.JSONDecodeError:
+        return {"_raw": raw_text, "stop": [], "winning": [], "new_ads": []}
 
 
 # ---------------------------------------------------------------------------
