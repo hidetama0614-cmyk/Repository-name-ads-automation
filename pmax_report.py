@@ -407,10 +407,7 @@ def main():
         print("対象データがありません。処理を終了します。")
         return
 
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
     gc    = gspread.authorize(creds)
 
