@@ -94,7 +94,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -124,7 +124,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 }"""
     retry = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8192,
         system=(
             "あなたはJSONフォーマッターです。"
             "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
@@ -368,7 +368,8 @@ def main():
     write_raw_sheet(sh, rows, config)
 
     print("Claude（creative-analyst）で分析中...")
-    analysis = analyze_with_claude(rows)
+    analysis_rows = sorted(rows, key=lambda r: r["cost"], reverse=True)[:150]
+    analysis = analyze_with_claude(analysis_rows)
     print("  → 分析完了")
 
     write_analysis_sheet(sh, analysis, config)
