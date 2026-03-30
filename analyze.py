@@ -223,35 +223,51 @@ def notify_slack(results: dict, config: dict):
     today = results["date"]
     lines = [f"*📊 Google Ads レポート（{today}）*"]
 
+    DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
+
     # ① 無駄コスト
     if wasted:
         total_wasted = sum(r["cost"] for r in wasted)
-        lines.append(f"\n*🚨 無駄コスト  {len(wasted)}件｜合計 ¥{total_wasted:,}*")
-        for r in wasted[:5]:
-            lines.append(f"  • {r['keyword']}  ｜  ¥{r['cost']:,}  ｜  CV 0件  →  停止 or マッチタイプ変更")
+        lines.append(f"\n{DIVIDER}")
+        lines.append(f"*🚨 無駄コスト  {len(wasted)}件｜合計 ¥{total_wasted:,}*")
+        lines.append(DIVIDER)
+        for i, r in enumerate(wasted[:5], 1):
+            lines.append(f"*{i}. {r['keyword']}（{r['match_type']}）  →  停止 or マッチタイプ変更*")
+            lines.append(f"・キャンペーン：{r['campaign']}")
+            lines.append(f"・広告グループ：{r['ad_group']}")
+            lines.append(f"・費用 ¥{r['cost']:,}  ｜  CV 0件")
+            lines.append("")
         if len(wasted) > 5:
             lines.append(f"  ほか {len(wasted) - 5} 件")
 
     # ② CPA悪化
     if high_cpa:
-        lines.append(f"\n*⚠️ CPA悪化  {len(high_cpa)}件*")
-        for r in high_cpa[:5]:
+        lines.append(f"{DIVIDER}")
+        lines.append(f"*⚠️ CPA悪化  {len(high_cpa)}件*")
+        lines.append(DIVIDER)
+        for i, r in enumerate(high_cpa[:5], 1):
             cpa = int(r["cpa"])
-            lines.append(
-                f"  • {r['keyword']}  ｜  CPA ¥{cpa:,}（目標 ¥{target_cpa:,}）｜  CV {r['hon_cv']}件  ｜  費用 ¥{r['cost']:,}"
-            )
+            lines.append(f"*{i}. {r['keyword']}（{r['match_type']}）  →  入札引き下げ*")
+            lines.append(f"・キャンペーン：{r['campaign']}")
+            lines.append(f"・広告グループ：{r['ad_group']}")
+            lines.append(f"・CPA ¥{cpa:,}（目標 ¥{target_cpa:,}）｜  CV {r['hon_cv']}件  ｜  費用 ¥{r['cost']:,}")
+            lines.append("")
         if len(high_cpa) > 5:
             lines.append(f"  ほか {len(high_cpa) - 5} 件")
 
     # ③ 伸びしろ TOP3
     if growth:
-        lines.append(f"\n*💡 伸びしろ TOP3*")
-        for r in growth:
+        lines.append(f"{DIVIDER}")
+        lines.append(f"*💡 伸びしろ TOP3*")
+        lines.append(DIVIDER)
+        for i, r in enumerate(growth, 1):
             cpa = int(r["cpa"])
             ratio = int(cpa / target_cpa * 100) if target_cpa > 0 else 0
-            lines.append(
-                f"  • {r['keyword']}  ｜  CPA ¥{cpa:,}（目標の {ratio}%）｜  CV {r['hon_cv']}件  ｜  クリック {r['clicks']}"
-            )
+            lines.append(f"*{i}. {r['keyword']}（{r['match_type']}）  →  予算増額 / 入札引き上げ*")
+            lines.append(f"・キャンペーン：{r['campaign']}")
+            lines.append(f"・広告グループ：{r['ad_group']}")
+            lines.append(f"・CPA ¥{cpa:,}（目標の {ratio}%）｜  CV {r['hon_cv']}件  ｜  クリック {r['clicks']}")
+            lines.append("")
 
     requests.post(webhook_url, json={"text": "\n".join(lines)}, timeout=10)
 
