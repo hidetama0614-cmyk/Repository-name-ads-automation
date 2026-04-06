@@ -40,7 +40,7 @@ def fetch_campaign_frequency():
     params = {
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
-        "fields": "campaign_name,frequency,reach,impressions,spend",
+        "fields": "campaign_id,campaign_name,frequency,reach,impressions,spend",
         "time_range": json.dumps({"since": since, "until": until}),
         "limit": 100,
     }
@@ -52,6 +52,31 @@ def fetch_campaign_frequency():
         raise Exception(f"Meta API エラー: {result['error']}")
 
     return result.get("data", []), since, until
+
+
+def fetch_creative_names(campaign_id):
+    """キャンペーンIDから配下の広告のクリエイティブ名（なければ広告名）を取得する。"""
+    url = f"https://graph.facebook.com/{API_VERSION}/{campaign_id}/ads"
+    params = {
+        "access_token": META_ACCESS_TOKEN,
+        "fields": "name,creative{name}",
+        "limit": 50,
+    }
+    try:
+        response = requests.get(url, params=params)
+        result = response.json()
+        if "error" in result:
+            return []
+        names = []
+        for ad in result.get("data", []):
+            # creative.name があればそちらを優先、なければ広告名を使う
+            creative = ad.get("creative", {})
+            name = creative.get("name") or ad.get("name", "")
+            if name and name not in names:
+                names.append(name)
+        return names
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +134,11 @@ def send_slack(alert_campaigns, all_campaigns, since, until):
             spend = round(float(c.get("spend", 0)))
             lines.append(f"🔴 *{c['campaign_name']}*")
             lines.append(f"　フリークエンシー：*{freq}*　消化金額：{spend:,}円")
+            campaign_id = c.get("campaign_id", "")
+            if campaign_id:
+                creative_names = fetch_creative_names(campaign_id)
+                if creative_names:
+                    lines.append("　クリエイティブ名：" + "\n　".join(creative_names))
         lines.append("")
         lines.append("クリエイティブの差し替えを検討してください。")
     else:
