@@ -8,6 +8,7 @@ meta_frequency_alert.py — Meta広告のフリークエンシーを毎日監視
 """
 
 import os
+import re
 import json
 import requests
 from datetime import date, timedelta
@@ -54,12 +55,21 @@ def fetch_campaign_frequency():
     return result.get("data", []), since, until
 
 
+def _clean_ad_name(name):
+    """広告名を見やすく整形する。"""
+    # 末尾の「 YYYY-MM-DD-英数字32文字」を除去
+    name = re.sub(r"\s+\d{4}-\d{2}-\d{2}-[a-f0-9]{32}$", "", name).strip()
+    # カタログ広告のテンプレート変数を日本語に置換
+    name = name.replace("{{product.name}}", "カタログ広告")
+    return name
+
+
 def fetch_creative_names(campaign_id):
-    """キャンペーンIDから配下の広告のクリエイティブ名（なければ広告名）を取得する。"""
+    """キャンペーンIDから配下の広告名を取得する。重複除去して最大5件。"""
     url = f"https://graph.facebook.com/{API_VERSION}/{campaign_id}/ads"
     params = {
         "access_token": META_ACCESS_TOKEN,
-        "fields": "name,creative{name}",
+        "fields": "name",
         "limit": 50,
     }
     try:
@@ -69,12 +79,10 @@ def fetch_creative_names(campaign_id):
             return []
         names = []
         for ad in result.get("data", []):
-            # creative.name があればそちらを優先、なければ広告名を使う
-            creative = ad.get("creative", {})
-            name = creative.get("name") or ad.get("name", "")
+            name = _clean_ad_name(ad.get("name", ""))
             if name and name not in names:
                 names.append(name)
-        return names
+        return names[:5]
     except Exception:
         return []
 
