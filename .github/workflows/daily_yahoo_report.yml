@@ -1,0 +1,35 @@
+name: Daily Yahoo Ads Report
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 毎日 09:00 JST (00:00 UTC)
+  workflow_dispatch:       # GitHub画面から手動実行も可能
+
+jobs:
+  yahoo-ads-report:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python のセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存関係をインストール
+        run: pip install gspread google-auth requests python-dotenv
+
+      - name: サービスアカウントJSONを復元
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Yahoo!広告レポートを実行
+        env:
+          YAHOO_ADS_CLIENT_ID:     ${{ secrets.YAHOO_ADS_CLIENT_ID }}
+          YAHOO_ADS_CLIENT_SECRET: ${{ secrets.YAHOO_ADS_CLIENT_SECRET }}
+          YAHOO_ADS_REFRESH_TOKEN: ${{ secrets.YAHOO_ADS_REFRESH_TOKEN }}
+          YAHOO_ADS_ACCOUNT_ID:    ${{ secrets.YAHOO_ADS_ACCOUNT_ID }}
+        run: python マーケティング/yahoo_report.py
