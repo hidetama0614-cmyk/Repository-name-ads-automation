@@ -200,42 +200,32 @@ def add_report_job(token, report_name, fields):
 
 
 def wait_for_completion(token, job_id):
-    """レポートが完成するまで最大20回（約10分）待機"""
+    """レポートが完成するまで最大20回（約10分）待機
+    /get エンドポイントに全件取得リクエストを送り、job_id で絞り込む"""
     headers = make_headers(token)
-    body = {
-        "accountId":   YAHOO_ADS_ACCOUNT_ID,
-        "reportJobId": job_id,
-    }
+    # selector なしで全レポートジョブ一覧を取得し、job_id を探す
+    body = {"accountId": YAHOO_ADS_ACCOUNT_ID}
+
     for attempt in range(20):
         res = requests.post(f"{API_BASE}/get", headers=headers, json=body)
         if not res.ok:
             print(f"[エラー] ステータス確認失敗: {res.status_code} {res.text}")
             sys.exit(1)
 
-        data = res.json()
-        print(f"  getレスポンス: {str(data)[:300]}")
+        data   = res.json()
+        values = data.get("rval", {}).get("values", [])
 
-        # レスポンス構造を柔軟に探索
         status = None
-        rval = data.get("rval", {})
-        if isinstance(rval, dict):
-            # パターンA: rval.values[0].reportDefinition.reportJobStatus
-            values = rval.get("values", [])
-            if values and isinstance(values, list):
-                rd = values[0].get("reportDefinition", {})
-                if rd:
-                    status = rd.get("reportJobStatus")
-            # パターンB: rval.reportDefinition.reportJobStatus
-            if not status:
-                rd = rval.get("reportDefinition", {})
-                if rd:
-                    status = rd.get("reportJobStatus")
-            # パターンC: rval.reportJobStatus
-            if not status:
-                status = rval.get("reportJobStatus")
+        for v in values:
+            rd = v.get("reportDefinition", {}) or {}
+            if rd.get("reportJobId") == job_id:
+                status = rd.get("reportJobStatus")
+                break
 
-        if not status:
-            status = "UNKNOWN"
+        if status is None:
+            print(f"  ジョブID {job_id} が一覧に見つかりません（{attempt + 1}回目）。60秒後に再確認...")
+            time.sleep(60)
+            continue
 
         print(f"  レポート状況: {status}（{attempt + 1}回目）")
 
