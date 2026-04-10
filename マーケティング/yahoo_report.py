@@ -203,10 +203,8 @@ def wait_for_completion(token, job_id):
     """レポートが完成するまで最大20回（約10分）待機"""
     headers = make_headers(token)
     body = {
-        "accountId": YAHOO_ADS_ACCOUNT_ID,
-        "selector": {
-            "reportJobIds": [job_id],
-        }
+        "accountId":   YAHOO_ADS_ACCOUNT_ID,
+        "reportJobId": job_id,
     }
     for attempt in range(20):
         res = requests.post(f"{API_BASE}/get", headers=headers, json=body)
@@ -214,8 +212,31 @@ def wait_for_completion(token, job_id):
             print(f"[エラー] ステータス確認失敗: {res.status_code} {res.text}")
             sys.exit(1)
 
-        data   = res.json()
-        status = data["rval"]["values"][0]["reportDefinition"].get("reportJobStatus", "UNKNOWN")
+        data = res.json()
+        print(f"  getレスポンス: {str(data)[:300]}")
+
+        # レスポンス構造を柔軟に探索
+        status = None
+        rval = data.get("rval", {})
+        if isinstance(rval, dict):
+            # パターンA: rval.values[0].reportDefinition.reportJobStatus
+            values = rval.get("values", [])
+            if values and isinstance(values, list):
+                rd = values[0].get("reportDefinition", {})
+                if rd:
+                    status = rd.get("reportJobStatus")
+            # パターンB: rval.reportDefinition.reportJobStatus
+            if not status:
+                rd = rval.get("reportDefinition", {})
+                if rd:
+                    status = rd.get("reportJobStatus")
+            # パターンC: rval.reportJobStatus
+            if not status:
+                status = rval.get("reportJobStatus")
+
+        if not status:
+            status = "UNKNOWN"
+
         print(f"  レポート状況: {status}（{attempt + 1}回目）")
 
         if status == "COMPLETED":
