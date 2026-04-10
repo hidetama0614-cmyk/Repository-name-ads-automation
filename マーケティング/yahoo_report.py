@@ -159,13 +159,32 @@ def add_report_job(token):
         sys.exit(1)
 
     data = res.json()
-    # レスポンス構造: {"rval": {"values": [{"reportDefinition": {"reportJobId": ...}}]}}
+    print(f"  レスポンス全体: {data}")
+
+    # v19のレスポンス構造を探索して reportJobId を取得
+    job_id = None
     try:
-        job_id = data["rval"]["values"][0]["reportDefinition"]["reportJobId"]
-    except (KeyError, IndexError) as e:
-        print(f"[エラー] レポートジョブIDの取得失敗: {e}")
-        print(f"  レスポンス: {data}")
+        values = data.get("rval", {}).get("values", [])
+        if values:
+            v = values[0]
+            # パターンA: {"reportDefinition": {"reportJobId": ...}}
+            if v.get("reportDefinition", {}) and v["reportDefinition"].get("reportJobId"):
+                job_id = v["reportDefinition"]["reportJobId"]
+            # パターンB: {"reportJobId": ...} (直接)
+            elif v.get("reportJobId"):
+                job_id = v["reportJobId"]
+        # パターンC: rval直下
+        if not job_id and data.get("rval", {}).get("reportJobId"):
+            job_id = data["rval"]["reportJobId"]
+    except Exception as e:
+        print(f"[エラー] レスポンスのパース失敗: {e}")
         sys.exit(1)
+
+    if not job_id:
+        print(f"[エラー] reportJobIdが見つかりません")
+        print(f"  レスポンス全体: {data}")
+        sys.exit(1)
+
     return job_id
 
 
