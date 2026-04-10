@@ -1,0 +1,25 @@
+name: Debug Yahoo Ads API
+
+on:
+  workflow_dispatch:  # 手動実行のみ
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests python-dotenv
+
+      - name: APIエンドポイントを調査
+        env:
+          YAHOO_ADS_CLIENT_ID:     ${{ secrets.YAHOO_ADS_CLIENT_ID }}
+          YAHOO_ADS_CLIENT_SECRET: ${{ secrets.YAHOO_ADS_CLIENT_SECRET }}
+          YAHOO_ADS_REFRESH_TOKEN: ${{ secrets.YAHOO_ADS_REFRESH_TOKEN }}
+          YAHOO_ADS_ACCOUNT_ID:    ${{ secrets.YAHOO_ADS_ACCOUNT_ID }}
+        run: python マーケティング/yahoo_api_debug.py
