@@ -205,9 +205,7 @@ def wait_for_completion(token, job_id):
     body = {
         "accountId": YAHOO_ADS_ACCOUNT_ID,
         "selector": {
-            "reportJobIds":  [job_id],
-            "startIndex":    1,
-            "numberResults": 1,
+            "reportJobIds": [job_id],
         }
     }
     for attempt in range(20):
