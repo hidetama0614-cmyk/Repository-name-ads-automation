@@ -1,6 +1,5 @@
 """
-Yahoo!広告APIのエンドポイントを調べるデバッグスクリプト
-どのURLが正しいかを自動で確認します。
+Yahoo!広告APIのエンドポイントを調べるデバッグスクリプト（ドメイン拡張版）
 """
 
 import os
@@ -28,87 +27,101 @@ def get_access_token():
     return res.json()["access_token"]
 
 
-def probe(token, url, method="GET", body=None):
-    """URLにリクエストを送り、ステータスコードとレスポンスを返す"""
+def probe(token, url, method="GET", body=None, extra_headers=None):
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
+    if extra_headers:
+        headers.update(extra_headers)
     try:
         if method == "POST":
             res = requests.post(url, headers=headers, json=body, timeout=10)
         else:
             res = requests.get(url, headers=headers, timeout=10)
-        return res.status_code, res.text[:200]
+        return res.status_code, res.text[:300]
     except Exception as e:
-        return "ERR", str(e)
+        return "ERR", str(e)[:100]
 
+
+def print_result(label, status, body):
+    mark = "✓" if str(status) not in ["404", "ERR"] else "✗"
+    print(f"  {mark} {status}  {label}")
+    if str(status) not in ["404", "ERR"]:
+        print(f"       → {body}")
+
+
+REPORT_BODY = {
+    "reportName": "test",
+    "reportType": "CAMPAIGN",
+    "dateRangeType": "YESTERDAY",
+    "fields": ["CAMPAIGN_NAME", "IMPRESSIONS"],
+    "format": "TSV",
+}
+
+# 試すドメイン一覧
+DOMAINS = [
+    "ads.yahoo.co.jp",
+    "ads-search.yahooapis.jp",
+    "ads.yahooapis.jp",
+    "ss.yahooapis.jp",
+    "lyads.yahooapis.jp",
+    "ads-display.yahoo.co.jp",
+    "businessmanager.yahoo.co.jp",
+]
+
+VERSIONS = range(6, 16)
 
 if __name__ == "__main__":
     print("アクセストークンを取得中...")
     token = get_access_token()
     print("取得しました\n")
 
-    # ── テスト①：APIバージョンを変えて試す ──────────────────
-    print("=" * 60)
-    print("【テスト①】APIバージョン別 /reports エンドポイント")
-    print("=" * 60)
-
-    report_body = {
-        "reportName": "test",
-        "reportType": "CAMPAIGN",
-        "dateRangeType": "YESTERDAY",
-        "fields": ["CAMPAIGN_NAME", "IMPRESSIONS"],
-        "format": "TSV",
-    }
-
-    for version in range(6, 16):
-        url = f"https://ads.yahoo.co.jp/api/v{version}/{ACCOUNT_ID}/reports"
-        status, body = probe(token, url, method="POST", body=report_body)
-        mark = "✓" if str(status) not in ["404", "ERR"] else "✗"
-        print(f"  {mark} v{version:2d}  {status}  {url}")
-        if str(status) not in ["404", "ERR"]:
-            print(f"       レスポンス: {body}")
+    # ── テスト①：ドメイン × バージョン × アカウントIDあり ─────
+    print("=" * 70)
+    print("【テスト①】各ドメイン /{accountId}/reports")
+    print("=" * 70)
+    for domain in DOMAINS:
+        for v in VERSIONS:
+            url = f"https://{domain}/api/v{v}/{ACCOUNT_ID}/reports"
+            status, body = probe(token, url, method="POST", body=REPORT_BODY)
+            print_result(url, status, body)
 
     print()
 
-    # ── テスト②：アカウントIDなしのURL ──────────────────────
-    print("=" * 60)
-    print("【テスト②】アカウントIDなしのURL")
-    print("=" * 60)
-
-    for version in range(6, 16):
-        url = f"https://ads.yahoo.co.jp/api/v{version}/reports"
-        status, body = probe(token, url, method="POST", body=report_body)
-        mark = "✓" if str(status) not in ["404", "ERR"] else "✗"
-        print(f"  {mark} v{version:2d}  {status}  {url}")
-        if str(status) not in ["404", "ERR"]:
-            print(f"       レスポンス: {body}")
+    # ── テスト②：ドメイン × バージョン × アカウントIDなし ─────
+    print("=" * 70)
+    print("【テスト②】各ドメイン /reports（アカウントIDなし）")
+    print("=" * 70)
+    for domain in DOMAINS:
+        for v in VERSIONS:
+            url = f"https://{domain}/api/v{v}/reports"
+            status, body = probe(token, url, method="POST", body=REPORT_BODY)
+            print_result(url, status, body)
 
     print()
 
-    # ── テスト③：ヘッダーにアカウントIDを入れる形式 ──────────
-    print("=" * 60)
-    print("【テスト③】X-LY-AdsAccountId ヘッダー形式")
-    print("=" * 60)
-
-    for version in range(6, 16):
-        url = f"https://ads.yahoo.co.jp/api/v{version}/reports"
-        try:
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "X-LY-AdsAccountId": ACCOUNT_ID,
-            }
-            res = requests.post(url, headers=headers, json=report_body, timeout=10)
-            status = res.status_code
-            body = res.text[:200]
-        except Exception as e:
-            status, body = "ERR", str(e)
-        mark = "✓" if str(status) not in ["404", "ERR"] else "✗"
-        print(f"  {mark} v{version:2d}  {status}  {url}")
-        if str(status) not in ["404", "ERR"]:
-            print(f"       レスポンス: {body}")
+    # ── テスト③：旧SOAP系サービス名パス ──────────────────────
+    print("=" * 70)
+    print("【テスト③】サービス名パス")
+    print("=" * 70)
+    services = ["ReportDefinitionService", "ReportService", "StatsService"]
+    for domain in ["ads.yahoo.co.jp", "ss.yahooapis.jp", "ads-search.yahooapis.jp"]:
+        for v in VERSIONS:
+            for svc in services:
+                url = f"https://{domain}/api/v{v}/services/{svc}"
+                status, body = probe(token, url, method="GET")
+                print_result(url, status, body)
 
     print()
-    print("完了しました。「✓」がついた行が正しいエンドポイントです。")
+
+    # ── テスト④：GETでルートを叩いてみる ─────────────────────
+    print("=" * 70)
+    print("【テスト④】ルートURL確認（何かが返るか）")
+    print("=" * 70)
+    for domain in DOMAINS:
+        url = f"https://{domain}/"
+        status, body = probe(token, url, method="GET")
+        print_result(f"{domain}/", status, body)
+
+    print("\n完了。「✓」がついた行が正しいエンドポイントです。")
