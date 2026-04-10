@@ -127,24 +127,30 @@ def get_access_token():
 def add_report_job(token):
     """レポートジョブを登録してジョブIDを返す"""
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # v19 では日付範囲を customDateRange オブジェクトで指定する
+    operand = {
+        "reportName":          f"キャンペーンレポート_{start_date}_{end_date}",
+        "reportType":          "CAMPAIGN",
+        "reportDateRangeType": "CUSTOM_DATE",
+        "customDateRange": {
+            "startDate": start_date,
+            "endDate":   end_date,
+        },
+        "fields":              REPORT_FIELDS,
+        "sortFields":          [{"type": "ASCENDING", "field": "CAMPAIGN_NAME"}],
+        "reportDownloadFormat": "CSV",
+        "reportDownloadEncode": "UTF-8",
+    }
     body = {
         "accountId": YAHOO_ADS_ACCOUNT_ID,
-        "operand": [{
-            "reportName":         f"キャンペーンレポート_{start_date}_{end_date}",
-            "reportType":         "CAMPAIGN",
-            "reportDateRangeType": "CUSTOM_DATE",
-            "reportStartDate":    start_date,
-            "reportEndDate":      end_date,
-            "fields":             REPORT_FIELDS,
-            "sortFields":         [{"type": "ASCENDING", "field": "CAMPAIGN_NAME"}],
-            "reportDownloadFormat": "CSV",
-            "reportDownloadEncode": "UTF-8",
-        }]
+        "operand":   [operand],
     }
+    import json as _json
+    print(f"  送信リクエスト: {_json.dumps(body, ensure_ascii=False)[:300]}")
     res = requests.post(f"{API_BASE}/add", headers=headers, json=body)
     if not res.ok:
         print(f"[エラー] レポート登録失敗: {res.status_code}")
-        print(f"  URL     : {API_BASE}/add")
+        print(f"  URL       : {API_BASE}/add")
         print(f"  レスポンス: {res.text}")
         sys.exit(1)
 
