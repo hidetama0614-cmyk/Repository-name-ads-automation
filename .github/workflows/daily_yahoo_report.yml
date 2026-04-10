@@ -32,5 +32,4 @@ jobs:
           YAHOO_ADS_CLIENT_SECRET:   ${{ secrets.YAHOO_ADS_CLIENT_SECRET }}
           YAHOO_ADS_REFRESH_TOKEN:   ${{ secrets.YAHOO_ADS_REFRESH_TOKEN }}
           YAHOO_ADS_ACCOUNT_ID:      ${{ secrets.YAHOO_ADS_ACCOUNT_ID }}
-          YAHOO_ADS_BASE_ACCOUNT_ID: ${{ secrets.YAHOO_ADS_BASE_ACCOUNT_ID }}
         run: python マーケティング/yahoo_report.py

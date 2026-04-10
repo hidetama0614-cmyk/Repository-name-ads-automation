@@ -26,8 +26,8 @@ load_dotenv()
 YAHOO_ADS_CLIENT_ID       = os.getenv("YAHOO_ADS_CLIENT_ID")
 YAHOO_ADS_CLIENT_SECRET   = os.getenv("YAHOO_ADS_CLIENT_SECRET")
 YAHOO_ADS_REFRESH_TOKEN   = os.getenv("YAHOO_ADS_REFRESH_TOKEN")
-YAHOO_ADS_ACCOUNT_ID      = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))       # キャンペーンアカウントID
-YAHOO_ADS_BASE_ACCOUNT_ID = os.getenv("YAHOO_ADS_BASE_ACCOUNT_ID", "1001894160")    # ベースアカウントID
+YAHOO_ADS_ACCOUNT_ID      = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))  # キャンペーンアカウントID
+YAHOO_ADS_BASE_ACCOUNT_ID = "1001894160"                                           # ベースアカウントID（固定）
 
 SPREADSHEET_ID = "1u1wH7WiCjYoN0p4IFNPXfYsr_h5bnAxEb0tdBgTEx-8"
 
