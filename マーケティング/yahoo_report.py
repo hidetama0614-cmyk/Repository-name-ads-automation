@@ -124,9 +124,18 @@ def get_access_token():
     return res.json()["access_token"]
 
 
+def make_headers(token):
+    """全APIリクエストに共通のヘッダーを返す"""
+    return {
+        "Authorization":      f"Bearer {token}",
+        "Content-Type":       "application/json",
+        "x-z-base-account-id": str(YAHOO_ADS_ACCOUNT_ID),
+    }
+
+
 def add_report_job(token):
     """レポートジョブを登録してジョブIDを返す"""
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = make_headers(token)
     # THIS_MONTH = 当月1日〜本日（日次9時実行のため当日データはほぼゼロ）
     operand = {
         "reportName":          f"キャンペーンレポート_{today.strftime('%Y%m')}",
@@ -161,7 +170,7 @@ def add_report_job(token):
 
 def wait_for_completion(token, job_id):
     """レポートが完成するまで最大20回（約10分）待機"""
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = make_headers(token)
     body = {
         "accountId": YAHOO_ADS_ACCOUNT_ID,
         "selector": {
@@ -194,7 +203,7 @@ def wait_for_completion(token, job_id):
 
 def download_report(token, job_id):
     """完成したレポートをダウンロードして行データのリストを返す"""
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = make_headers(token)
     body    = {"accountId": YAHOO_ADS_ACCOUNT_ID, "reportJobId": job_id}
     res     = requests.post(f"{API_BASE}/download", headers=headers, json=body)
 
