@@ -133,7 +133,6 @@ def add_report_job(token):
         "reportType":          "CAMPAIGN",
         "reportDateRangeType": "THIS_MONTH",
         "fields":              REPORT_FIELDS,
-        "sortFields":          [{"type": "ASCENDING", "field": "CAMPAIGN_NAME"}],
         "reportDownloadFormat": "CSV",
         "reportDownloadEncode": "UTF-8",
     }
