@@ -7,7 +7,8 @@ Yahoo!広告（LINEヤフー広告 検索広告）実績レポート取得スク
 必須の環境変数（GitHub Secrets）:
   YAHOO_ADS_CLIENT_ID     : LINEヤフー広告アプリのクライアントID
   YAHOO_ADS_CLIENT_SECRET : LINEヤフー広告アプリのクライアントシークレット
-  YAHOO_ADS_REFRESH_TOKEN : yahoo_auth.py で取得したリフレッシュトークン
+  YAHOO_ADS_REFRESH_TOKEN : リフレッシュトークン
+  YAHOO_ADS_ACCOUNT_ID    : 検索広告アカウントID（例: 1003214）
 """
 
 import os
@@ -25,14 +26,13 @@ load_dotenv()
 YAHOO_ADS_CLIENT_ID     = os.getenv("YAHOO_ADS_CLIENT_ID")
 YAHOO_ADS_CLIENT_SECRET = os.getenv("YAHOO_ADS_CLIENT_SECRET")
 YAHOO_ADS_REFRESH_TOKEN = os.getenv("YAHOO_ADS_REFRESH_TOKEN")
-YAHOO_ADS_ACCOUNT_ID    = os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214")  # 検索広告アカウントID
+YAHOO_ADS_ACCOUNT_ID    = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))
 
 SPREADSHEET_ID = "1u1wH7WiCjYoN0p4IFNPXfYsr_h5bnAxEb0tdBgTEx-8"
 
-# ─── エンドポイント（LINEヤフー広告 公式URL）───────────────────
-OAUTH_BASE      = "https://biz-oauth.yahoo.co.jp/oauth"
-TOKEN_URL       = f"{OAUTH_BASE}/v1/token"
-YAHOO_API_BASE  = f"https://ads.yahoo.co.jp/api/v13/{YAHOO_ADS_ACCOUNT_ID}"
+# ─── エンドポイント（公式 v19）────────────────────────────────
+OAUTH_TOKEN_URL = "https://biz-oauth.yahoo.co.jp/oauth/v1/token"
+API_BASE        = "https://ads-search.yahooapis.jp/api/v19/ReportDefinitionService"
 
 # ─── 必須環境変数チェック ─────────────────────────────────────
 def check_env():
@@ -43,18 +43,16 @@ def check_env():
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
-        print("[エラー] 以下の環境変数（GitHub Secrets）が設定されていません：")
+        print("[エラー] 以下のGitHub Secretsが設定されていません：")
         for k in missing:
             print(f"  - {k}")
-        print()
-        print("  GitHub → Settings → Secrets and variables → Actions で登録してください")
         sys.exit(1)
 
 # ─── 日付範囲（当月1日〜前日）────────────────────────────────
 today = date.today()
 
 if today.day == 1:
-    print("本日は月初のため、当月データがありません。処理をスキップします。")
+    print("本日は月初のため、当月データがありません。スキップします。")
     sys.exit(0)
 
 start_date = today.replace(day=1).strftime("%Y%m%d")
@@ -85,134 +83,135 @@ HEADER = [
     "ページ最上部のインプレッションシェア",
 ]
 
-# ─── Yahoo広告APIのレポートフィールド（HEADERと同じ順番）────
+# ─── Yahoo広告 APIフィールド（HEADERと同じ順番）────────────
+# 出典: https://yahoojp-marketing.github.io/ads-search-api-documents/reports/v19/CAMPAIGN.csv
 REPORT_FIELDS = [
-    "CAMPAIGN_DISTRIBUTION_SETTINGS",           # 配信設定
-    "CAMPAIGN_NAME",                            # キャンペーン名
-    "CONVERSION_NAME",                          # コンバージョン名
-    "CAMPAIGN_STATUS",                          # 配信状況
-    "BID_STRATEGY_STATUS",                      # 入札戦略の状況
-    "CAMPAIGN_TYPE",                            # キャンペーンタイプ
-    "BID_STRATEGY_TYPE",                        # 入札戦略
-    "DAILY_BUDGET",                             # 1日の予算
-    "IMPRESSIONS",                              # インプレッション数
-    "CLICKS",                                   # クリック数
-    "CTR",                                      # クリック率
-    "COST",                                     # コスト
-    "AVG_CPC",                                  # 平均CPC
-    "CONVERSIONS",                              # コンバージョン数
-    "CONV_RATE",                                # コンバージョン率
-    "LABELS",                                   # ラベル
-    "SEARCH_TOP_IMPRESSION_RATE",               # ページ上部の割合
-    "SEARCH_ABSOLUTE_TOP_IMPRESSION_RATE",      # ページ最上部の割合
-    "ALL_CONVERSIONS",                          # コンバージョン数（全て）
-    "SEARCH_TOP_IMPRESSION_SHARE",              # ページ上部インプレッションシェア
-    "SEARCH_ABSOLUTE_TOP_IMPRESSION_SHARE",     # ページ最上部インプレッションシェア
+    "CAMPAIGN_DISTRIBUTION_SETTINGS",       # 配信設定
+    "CAMPAIGN_NAME",                        # キャンペーン名
+    "CONVERSION_NAME",                      # コンバージョン名
+    "CAMPAIGN_DISTRIBUTION_STATUS",         # 配信状況
+    "BID_STRATEGY_STATUS",                  # 入札戦略の状況
+    "CAMPAIGN_TYPE",                        # キャンペーンタイプ
+    "BID_STRATEGY_TYPE",                    # 入札戦略
+    "DAILY_SPENDING_LIMIT",                 # 1日の予算
+    "IMPS",                                 # インプレッション数
+    "CLICKS",                               # クリック数
+    "CLICK_RATE",                           # クリック率
+    "COST",                                 # コスト
+    "AVG_CPC",                              # 平均CPC
+    "CONVERSIONS",                          # コンバージョン数
+    "CONV_RATE",                            # コンバージョン率
+    "LABELS",                               # ラベル
+    "TOP_IMPRESSION_PERCENTAGE",            # ページ上部の割合
+    "ABSOLUTE_TOP_IMPRESSION_PERCENTAGE",   # ページ最上部の割合
+    "ALL_CONV",                             # コンバージョン数（全て）
+    "SEARCH_TOP_IMPRESSION_SHARE",          # ページ上部インプレッションシェア
+    "SEARCH_ABSOLUTE_TOP_IMPRESSION_SHARE", # ページ最上部インプレッションシェア
 ]
 
 
 def get_access_token():
-    """
-    refresh_token でアクセストークンを取得
-    grant_type: refresh_token
-    """
-    print(f"  URL        : {TOKEN_URL}")
-    print(f"  grant_type : refresh_token")
-
-    res = requests.post(TOKEN_URL, data={
+    """リフレッシュトークンでアクセストークンを取得"""
+    res = requests.post(OAUTH_TOKEN_URL, data={
         "grant_type":    "refresh_token",
         "client_id":     YAHOO_ADS_CLIENT_ID,
         "client_secret": YAHOO_ADS_CLIENT_SECRET,
         "refresh_token": YAHOO_ADS_REFRESH_TOKEN,
     })
-
     if not res.ok:
-        print(f"\n[エラー] アクセストークンの取得に失敗しました")
-        print(f"  HTTP status : {res.status_code}")
-        print(f"  URL         : {TOKEN_URL}")
-        print(f"  grant_type  : refresh_token")
-        print(f"  レスポンス  : {res.text}")
+        print(f"[エラー] トークン取得失敗: {res.status_code} {res.text}")
         sys.exit(1)
-
     return res.json()["access_token"]
 
 
-def create_report_job(token):
-    """レポートジョブを作成し、ジョブIDを返す"""
-    url = f"{YAHOO_API_BASE}/reports"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type":  "application/json",
-    }
+def add_report_job(token):
+    """レポートジョブを登録してジョブIDを返す"""
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     body = {
-        "reportName":             f"キャンペーンレポート_{start_date}_{end_date}",
-        "reportType":             "CAMPAIGN",
-        "dateRangeType":          "CUSTOM_DATE",
-        "dateRange":              {"startDate": start_date, "endDate": end_date},
-        "fields":                 REPORT_FIELDS,
-        "sortFields":             [{"field": "CAMPAIGN_NAME", "sortOrder": "ASCENDING"}],
-        "format":                 "TSV",
-        "encode":                 "UTF-8",
-        "includeZeroImpressions": True,
+        "accountId": YAHOO_ADS_ACCOUNT_ID,
+        "operand": [{
+            "reportName":         f"キャンペーンレポート_{start_date}_{end_date}",
+            "reportType":         "CAMPAIGN",
+            "reportDateRangeType": "CUSTOM_DATE",
+            "reportStartDate":    start_date,
+            "reportEndDate":      end_date,
+            "fields":             REPORT_FIELDS,
+            "sortFields":         [{"type": "ASCENDING", "field": "CAMPAIGN_NAME"}],
+            "reportDownloadFormat": "CSV",
+            "reportDownloadEncode": "UTF-8",
+        }]
     }
-
-    res = requests.post(url, headers=headers, json=body)
-
+    res = requests.post(f"{API_BASE}/add", headers=headers, json=body)
     if not res.ok:
-        print(f"\n[エラー] レポートジョブの作成に失敗しました")
-        print(f"  HTTP status  : {res.status_code}")
-        print(f"  URL          : {url}")
-        print(f"  アカウントID : {YAHOO_ADS_ACCOUNT_ID}")
-        print(f"  レスポンス   : {res.text}")
+        print(f"[エラー] レポート登録失敗: {res.status_code}")
+        print(f"  URL     : {API_BASE}/add")
+        print(f"  レスポンス: {res.text}")
         sys.exit(1)
 
-    return res.json()["reportJobId"]
+    data = res.json()
+    # レスポンス構造: {"rval": {"values": [{"reportDefinition": {"reportJobId": ...}}]}}
+    try:
+        job_id = data["rval"]["values"][0]["reportDefinition"]["reportJobId"]
+    except (KeyError, IndexError) as e:
+        print(f"[エラー] レポートジョブIDの取得失敗: {e}")
+        print(f"  レスポンス: {data}")
+        sys.exit(1)
+    return job_id
 
 
 def wait_for_completion(token, job_id):
     """レポートが完成するまで最大20回（約10分）待機"""
-    url     = f"{YAHOO_API_BASE}/reports/{job_id}"
-    headers = {"Authorization": f"Bearer {token}"}
-
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body = {
+        "accountId": YAHOO_ADS_ACCOUNT_ID,
+        "selector": {
+            "reportJobIds":  [job_id],
+            "startIndex":    1,
+            "numberResults": 1,
+        }
+    }
     for attempt in range(20):
-        res = requests.get(url, headers=headers)
+        res = requests.post(f"{API_BASE}/get", headers=headers, json=body)
         if not res.ok:
-            print(f"[エラー] レポート状態の確認に失敗: {res.status_code} {res.text}")
+            print(f"[エラー] ステータス確認失敗: {res.status_code} {res.text}")
             sys.exit(1)
 
         data   = res.json()
-        status = data.get("reportJobStatus", "UNKNOWN")
+        status = data["rval"]["values"][0]["reportDefinition"].get("reportJobStatus", "UNKNOWN")
         print(f"  レポート状況: {status}（{attempt + 1}回目）")
 
         if status == "COMPLETED":
             return
         elif status == "FAILED":
-            print(f"\n[エラー] レポート生成が失敗しました")
-            print(f"  レスポンス: {data}")
+            print(f"[エラー] レポート生成失敗: {data}")
             sys.exit(1)
 
         time.sleep(30)
 
-    print("[エラー] レポート生成がタイムアウトしました（10分以上かかっています）")
+    print("[エラー] タイムアウト（10分以上かかっています）")
     sys.exit(1)
 
 
 def download_report(token, job_id):
-    """完成したレポートをダウンロードし、行データのリストを返す"""
-    url     = f"{YAHOO_API_BASE}/reports/{job_id}/download"
-    headers = {"Authorization": f"Bearer {token}"}
-    res     = requests.get(url, headers=headers)
+    """完成したレポートをダウンロードして行データのリストを返す"""
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body    = {"accountId": YAHOO_ADS_ACCOUNT_ID, "reportJobId": job_id}
+    res     = requests.post(f"{API_BASE}/download", headers=headers, json=body)
 
     if not res.ok:
-        print(f"\n[エラー] レポートのダウンロードに失敗しました")
-        print(f"  HTTP status : {res.status_code}")
-        print(f"  URL         : {url}")
-        print(f"  レスポンス  : {res.text}")
+        print(f"[エラー] ダウンロード失敗: {res.status_code} {res.text}")
         sys.exit(1)
 
-    # TSV形式: 1行目がヘッダーなのでスキップ
+    # CSV形式: 1行目はヘッダーなのでスキップ
     lines = res.text.strip().split("\n")
-    rows  = [line.split("\t") for line in lines[1:] if line.strip()]
+    rows  = []
+    for line in lines[1:]:
+        if line.strip():
+            # CSVをパース（カンマ区切り・ダブルクォート対応）
+            import csv
+            import io
+            row = next(csv.reader(io.StringIO(line)))
+            rows.append(row)
     return rows
 
 
@@ -244,14 +243,15 @@ if __name__ == "__main__":
     print(f"Yahoo!広告レポート取得開始")
     print(f"期間: {start_date} 〜 {end_date}")
     print(f"アカウントID: {YAHOO_ADS_ACCOUNT_ID}")
+    print(f"API: {API_BASE}")
     print()
 
     print("① アクセストークンを取得中...")
     token = get_access_token()
     print("  取得しました")
 
-    print("② レポートジョブを作成中...")
-    job_id = create_report_job(token)
+    print("② レポートジョブを登録中...")
+    job_id = add_report_job(token)
     print(f"  ジョブID: {job_id}")
 
     print("③ レポート完成を待機中...")
