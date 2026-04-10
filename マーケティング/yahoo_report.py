@@ -23,10 +23,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ─── 設定 ─────────────────────────────────────────────────────
-YAHOO_ADS_CLIENT_ID     = os.getenv("YAHOO_ADS_CLIENT_ID")
-YAHOO_ADS_CLIENT_SECRET = os.getenv("YAHOO_ADS_CLIENT_SECRET")
-YAHOO_ADS_REFRESH_TOKEN = os.getenv("YAHOO_ADS_REFRESH_TOKEN")
-YAHOO_ADS_ACCOUNT_ID    = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))
+YAHOO_ADS_CLIENT_ID       = os.getenv("YAHOO_ADS_CLIENT_ID")
+YAHOO_ADS_CLIENT_SECRET   = os.getenv("YAHOO_ADS_CLIENT_SECRET")
+YAHOO_ADS_REFRESH_TOKEN   = os.getenv("YAHOO_ADS_REFRESH_TOKEN")
+YAHOO_ADS_ACCOUNT_ID      = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))       # キャンペーンアカウントID
+YAHOO_ADS_BASE_ACCOUNT_ID = os.getenv("YAHOO_ADS_BASE_ACCOUNT_ID", "1001894160")    # ベースアカウントID
 
 SPREADSHEET_ID = "1u1wH7WiCjYoN0p4IFNPXfYsr_h5bnAxEb0tdBgTEx-8"
 
@@ -127,9 +128,9 @@ def get_access_token():
 def make_headers(token):
     """全APIリクエストに共通のヘッダーを返す"""
     return {
-        "Authorization":      f"Bearer {token}",
-        "Content-Type":       "application/json",
-        "x-z-base-account-id": str(YAHOO_ADS_ACCOUNT_ID),
+        "Authorization":       f"Bearer {token}",
+        "Content-Type":        "application/json",
+        "x-z-base-account-id": YAHOO_ADS_BASE_ACCOUNT_ID,
     }
 
 
