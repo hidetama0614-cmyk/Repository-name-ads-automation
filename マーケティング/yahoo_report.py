@@ -134,7 +134,6 @@ def add_report_job(token):
         "reportDateRangeType": "THIS_MONTH",
         "fields":              REPORT_FIELDS,
         "reportDownloadFormat": "CSV",
-        "reportDownloadEncode": "UTF-8",
     }
     body = {
         "accountId": YAHOO_ADS_ACCOUNT_ID,
