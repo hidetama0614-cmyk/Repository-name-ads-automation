@@ -127,15 +127,11 @@ def get_access_token():
 def add_report_job(token):
     """レポートジョブを登録してジョブIDを返す"""
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    # v19 では日付範囲を customDateRange オブジェクトで指定する
+    # THIS_MONTH = 当月1日〜本日（日次9時実行のため当日データはほぼゼロ）
     operand = {
-        "reportName":          f"キャンペーンレポート_{start_date}_{end_date}",
+        "reportName":          f"キャンペーンレポート_{today.strftime('%Y%m')}",
         "reportType":          "CAMPAIGN",
-        "reportDateRangeType": "CUSTOM_DATE",
-        "customDateRange": {
-            "startDate": start_date,
-            "endDate":   end_date,
-        },
+        "reportDateRangeType": "THIS_MONTH",
         "fields":              REPORT_FIELDS,
         "sortFields":          [{"type": "ASCENDING", "field": "CAMPAIGN_NAME"}],
         "reportDownloadFormat": "CSV",
