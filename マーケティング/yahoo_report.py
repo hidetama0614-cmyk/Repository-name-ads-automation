@@ -1,7 +1,8 @@
 """
 Yahoo!広告（LINEヤフー広告 検索広告）実績レポート取得スクリプト
 ・期間: 当月1日〜前日
-・出力先: Googleスプレッドシート「【添付】N月Yahoo!広告」タブ
+・出力先①: Googleスプレッドシート「【添付】N月Yahoo!広告」タブ（キャンペーン実績）
+・出力先②: Googleスプレッドシート「【添付】N月Yahoo!広告_CV内訳」タブ（コンバージョン名別）
 ・毎日 GitHub Actions で自動実行
 
 必須の環境変数（GitHub Secrets）:
@@ -14,6 +15,8 @@ Yahoo!広告（LINEヤフー広告 検索広告）実績レポート取得スク
 import os
 import sys
 import time
+import csv
+import io
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
@@ -27,7 +30,7 @@ YAHOO_ADS_CLIENT_ID       = os.getenv("YAHOO_ADS_CLIENT_ID")
 YAHOO_ADS_CLIENT_SECRET   = os.getenv("YAHOO_ADS_CLIENT_SECRET")
 YAHOO_ADS_REFRESH_TOKEN   = os.getenv("YAHOO_ADS_REFRESH_TOKEN")
 YAHOO_ADS_ACCOUNT_ID      = int(os.getenv("YAHOO_ADS_ACCOUNT_ID", "1003214"))  # キャンペーンアカウントID
-YAHOO_ADS_BASE_ACCOUNT_ID = "1001894160"                                           # ベースアカウントID（固定）
+YAHOO_ADS_BASE_ACCOUNT_ID = "1001894160"                                        # ベースアカウントID（固定）
 
 SPREADSHEET_ID = "1u1wH7WiCjYoN0p4IFNPXfYsr_h5bnAxEb0tdBgTEx-8"
 
@@ -56,14 +59,11 @@ if today.day == 1:
     print("本日は月初のため、当月データがありません。スキップします。")
     sys.exit(0)
 
-start_date = today.replace(day=1).strftime("%Y%m%d")
-end_date   = (today - timedelta(days=1)).strftime("%Y%m%d")
-
-# ─── スプレッドシートのヘッダー行 ────────────────────────────
-HEADER = [
+# ─── レポート①：キャンペーン実績（コンバージョン名なし）─────
+# ※ CONVERSION_NAME はインプレッション・費用などと同じレポートに入れられないため別タブで取得
+HEADER_CAMPAIGN = [
     "配信設定",
     "キャンペーン名",
-    "コンバージョン名",
     "配信状況",
     "入札戦略の状況",
     "キャンペーンタイプ",
@@ -84,12 +84,9 @@ HEADER = [
     "ページ最上部のインプレッションシェア",
 ]
 
-# ─── Yahoo広告 APIフィールド（HEADERと同じ順番）────────────
-# 出典: https://yahoojp-marketing.github.io/ads-search-api-documents/reports/v19/CAMPAIGN.csv
-REPORT_FIELDS = [
+FIELDS_CAMPAIGN = [
     "CAMPAIGN_DISTRIBUTION_SETTINGS",       # 配信設定
     "CAMPAIGN_NAME",                        # キャンペーン名
-    "CONVERSION_NAME",                      # コンバージョン名
     "CAMPAIGN_DISTRIBUTION_STATUS",         # 配信状況
     "BID_STRATEGY_STATUS",                  # 入札戦略の状況
     "CAMPAIGN_TYPE",                        # キャンペーンタイプ
@@ -108,6 +105,24 @@ REPORT_FIELDS = [
     "ALL_CONV",                             # コンバージョン数（全て）
     "SEARCH_TOP_IMPRESSION_SHARE",          # ページ上部インプレッションシェア
     "SEARCH_ABSOLUTE_TOP_IMPRESSION_SHARE", # ページ最上部インプレッションシェア
+]
+
+# ─── レポート②：コンバージョン名別内訳 ──────────────────────
+# ※ CONVERSION_NAME を含む場合は、コンバージョン系の指標のみ指定可能
+HEADER_CV = [
+    "キャンペーン名",
+    "コンバージョン名",
+    "コンバージョン数",
+    "コンバージョン率",
+    "コンバージョン数（全て）",
+]
+
+FIELDS_CV = [
+    "CAMPAIGN_NAME",    # キャンペーン名
+    "CONVERSION_NAME",  # コンバージョン名
+    "CONVERSIONS",      # コンバージョン数
+    "CONV_RATE",        # コンバージョン率
+    "ALL_CONV",         # コンバージョン数（全て）
 ]
 
 
@@ -134,22 +149,21 @@ def make_headers(token):
     }
 
 
-def add_report_job(token):
+def add_report_job(token, report_name, fields):
     """レポートジョブを登録してジョブIDを返す"""
+    import json as _json
     headers = make_headers(token)
-    # THIS_MONTH = 当月1日〜本日（日次9時実行のため当日データはほぼゼロ）
     operand = {
-        "reportName":          f"キャンペーンレポート_{today.strftime('%Y%m')}",
-        "reportType":          "CAMPAIGN",
-        "reportDateRangeType": "THIS_MONTH",
-        "fields":              REPORT_FIELDS,
+        "reportName":           report_name,
+        "reportType":           "CAMPAIGN",
+        "reportDateRangeType":  "THIS_MONTH",
+        "fields":               fields,
         "reportDownloadFormat": "CSV",
     }
     body = {
         "accountId": YAHOO_ADS_ACCOUNT_ID,
         "operand":   [operand],
     }
-    import json as _json
     print(f"  送信リクエスト: {_json.dumps(body, ensure_ascii=False)[:300]}")
     res = requests.post(f"{API_BASE}/add", headers=headers, json=body)
     if not res.ok:
@@ -161,19 +175,16 @@ def add_report_job(token):
     data = res.json()
     print(f"  レスポンス全体: {data}")
 
-    # v19のレスポンス構造を探索して reportJobId を取得
+    # v19のレスポンス構造から reportJobId を取得
     job_id = None
     try:
         values = data.get("rval", {}).get("values", [])
         if values:
             v = values[0]
-            # パターンA: {"reportDefinition": {"reportJobId": ...}}
             if v.get("reportDefinition", {}) and v["reportDefinition"].get("reportJobId"):
                 job_id = v["reportDefinition"]["reportJobId"]
-            # パターンB: {"reportJobId": ...} (直接)
             elif v.get("reportJobId"):
                 job_id = v["reportJobId"]
-        # パターンC: rval直下
         if not job_id and data.get("rval", {}).get("reportJobId"):
             job_id = data["rval"]["reportJobId"]
     except Exception as e:
@@ -236,32 +247,22 @@ def download_report(token, job_id):
     rows  = []
     for line in lines[1:]:
         if line.strip():
-            # CSVをパース（カンマ区切り・ダブルクォート対応）
-            import csv
-            import io
             row = next(csv.reader(io.StringIO(line)))
             rows.append(row)
     return rows
 
 
-def write_to_spreadsheet(rows):
-    """当月タブにヘッダーとデータを書き込む"""
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds  = Credentials.from_service_account_file("service_account.json", scopes=scopes)
-    gc     = gspread.authorize(creds)
-    sh     = gc.open_by_key(SPREADSHEET_ID)
-
-    tab_name = f"【添付】{today.month}月Yahoo!広告"
-
+def write_to_spreadsheet(gc, sh, tab_name, header, rows):
+    """指定タブにヘッダーとデータを書き込む"""
     try:
         ws = sh.worksheet(tab_name)
         ws.clear()
         print(f"  既存タブ「{tab_name}」をクリアして上書きします")
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=tab_name, rows=500, cols=len(HEADER) + 2)
+        ws = sh.add_worksheet(title=tab_name, rows=500, cols=len(header) + 2)
         print(f"  新しいタブ「{tab_name}」を作成しました")
 
-    ws.update("A1", [HEADER] + rows)
+    ws.update("A1", [header] + rows)
     print(f"  {len(rows)}行のデータを書き込みました")
 
 
@@ -270,7 +271,6 @@ if __name__ == "__main__":
     check_env()
 
     print(f"Yahoo!広告レポート取得開始")
-    print(f"期間: {start_date} 〜 {end_date}")
     print(f"アカウントID: {YAHOO_ADS_ACCOUNT_ID}")
     print(f"API: {API_BASE}")
     print()
@@ -279,20 +279,52 @@ if __name__ == "__main__":
     token = get_access_token()
     print("  取得しました")
 
-    print("② レポートジョブを登録中...")
-    job_id = add_report_job(token)
-    print(f"  ジョブID: {job_id}")
+    # ── レポート① キャンペーン実績 ───────────────────────────
+    print()
+    print("② キャンペーンレポートを登録中...")
+    job_id_campaign = add_report_job(
+        token,
+        f"キャンペーンレポート_{today.strftime('%Y%m')}",
+        FIELDS_CAMPAIGN,
+    )
+    print(f"  ジョブID: {job_id_campaign}")
 
-    print("③ レポート完成を待機中...")
-    wait_for_completion(token, job_id)
+    print("③ キャンペーンレポート完成を待機中...")
+    wait_for_completion(token, job_id_campaign)
     print("  完成しました")
 
-    print("④ レポートをダウンロード中...")
-    rows = download_report(token, job_id)
-    print(f"  {len(rows)}件取得しました")
+    print("④ キャンペーンレポートをダウンロード中...")
+    rows_campaign = download_report(token, job_id_campaign)
+    print(f"  {len(rows_campaign)}件取得しました")
 
-    print("⑤ スプレッドシートに書き込み中...")
-    write_to_spreadsheet(rows)
+    # ── レポート② コンバージョン名別内訳 ────────────────────
+    print()
+    print("⑤ コンバージョン名別レポートを登録中...")
+    job_id_cv = add_report_job(
+        token,
+        f"CV内訳レポート_{today.strftime('%Y%m')}",
+        FIELDS_CV,
+    )
+    print(f"  ジョブID: {job_id_cv}")
+
+    print("⑥ CV内訳レポート完成を待機中...")
+    wait_for_completion(token, job_id_cv)
+    print("  完成しました")
+
+    print("⑦ CV内訳レポートをダウンロード中...")
+    rows_cv = download_report(token, job_id_cv)
+    print(f"  {len(rows_cv)}件取得しました")
+
+    # ── スプレッドシート書き込み ──────────────────────────────
+    print()
+    print("⑧ スプレッドシートに書き込み中...")
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds  = Credentials.from_service_account_file("service_account.json", scopes=scopes)
+    gc     = gspread.authorize(creds)
+    sh     = gc.open_by_key(SPREADSHEET_ID)
+
+    write_to_spreadsheet(gc, sh, f"【添付】{today.month}月Yahoo!広告", HEADER_CAMPAIGN, rows_campaign)
+    write_to_spreadsheet(gc, sh, f"【添付】{today.month}月Yahoo!広告_CV内訳", HEADER_CV, rows_cv)
 
     print()
     print("完了しました！")
