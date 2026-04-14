@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    defaults:
+      run:
+        working-directory: マーケティング
 
     steps:
       - name: リポジトリをチェックアウト
@@ -34,4 +37,4 @@ jobs:
           GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
           GOOGLE_ADS_CUSTOMER_ID:     ${{ secrets.GOOGLE_ADS_CUSTOMER_ID }}
           SLACK_WEBHOOK_URL:          ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python main.py
+        run: python keyword_report.py

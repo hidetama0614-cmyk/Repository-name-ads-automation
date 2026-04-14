@@ -47,7 +47,7 @@ DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
 # ---------------------------------------------------------------------------
 
 def _load_agent_prompt(agent_name: str) -> str:
-    path = Path(__file__).parent / "claude" / "agents" / f"{agent_name}.md"
+    path = Path(__file__).parent.parent / ".claude" / "agents" / f"{agent_name}.md"
     content = path.read_text(encoding="utf-8")
     content = re.sub(r"^---.*?---\s*", "", content, flags=re.DOTALL)
     return content.strip()
