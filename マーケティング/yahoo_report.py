@@ -239,6 +239,28 @@ def wait_for_completion(token, job_id):
     sys.exit(1)
 
 
+def convert_value(val):
+    """文字列の値を数値に変換できる場合は変換する（カンマ・%記号に対応）"""
+    if not isinstance(val, str):
+        return val
+    v = val.strip()
+    # パーセント記号を除いて数値変換（クリック率・コンバージョン率など）
+    if v.endswith("%"):
+        try:
+            return float(v.rstrip("%").replace(",", ""))
+        except ValueError:
+            pass
+    # カンマを除いて整数または小数に変換（コスト・クリック数など）
+    cleaned = v.replace(",", "")
+    try:
+        if "." in cleaned:
+            return float(cleaned)
+        else:
+            return int(cleaned)
+    except ValueError:
+        return val
+
+
 def download_report(token, job_id):
     """完成したレポートをダウンロードして行データのリストを返す"""
     headers = make_headers(token)
@@ -255,7 +277,8 @@ def download_report(token, job_id):
     for line in lines[1:]:
         if line.strip():
             row = next(csv.reader(io.StringIO(line)))
-            rows.append(row)
+            # 各セルを数値に変換できる場合は変換する
+            rows.append([convert_value(cell) for cell in row])
     return rows
 
 
@@ -269,7 +292,7 @@ def write_to_spreadsheet(gc, sh, tab_name, header, rows):
         ws = sh.add_worksheet(title=tab_name, rows=500, cols=len(header) + 2)
         print(f"  新しいタブ「{tab_name}」を作成しました")
 
-    ws.update("A1", [header] + rows)
+    ws.update("A1", [header] + rows, value_input_option="RAW")
     print(f"  {len(rows)}行のデータを書き込みました")
 
 
