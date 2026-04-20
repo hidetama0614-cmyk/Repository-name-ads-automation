@@ -151,17 +151,16 @@ FIELD_TYPE_MAP = {
 
 def _format_for_claude(rows: list[dict]) -> str:
     lines = [
-        "以下はGoogle P-MAX広告のアセット（見出し・ロング見出し・説明文）の直近30日間の実績データです。分析をお願いします。\n",
-        "| 種別 | テキスト | パフォーマンスラベル | 表示回数 | クリック数 | 費用(円) | CTR(%) | CV数 | キャンペーン | アセットグループ |",
-        "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- |",
+        "P-MAX広告アセット直近30日実績。分析してください。",
+        "種別|テキスト|ラベル|表示回数|クリック|費用|CTR|CV|キャンペーン|グループ",
     ]
     for r in rows:
         label     = PERFORMANCE_LABEL_MAP.get(r["performance_label"], r["performance_label"])
         type_name = FIELD_TYPE_MAP.get(r["field_type"], r["field_type"])
+        campaign  = r["campaign"][:20]
+        grp       = r["asset_group"][:20]
         lines.append(
-            f"| {type_name} | {r['text']} | {label} "
-            f"| {r['impressions']:,} | {r['clicks']:,} | {r['cost']:,} "
-            f"| {r['ctr']} | {r['conversions']} | {r['campaign']} | {r['asset_group']} |"
+            f"{type_name}|{r['text']}|{label}|{r['impressions']}|{r['clicks']}|{r['cost']}|{r['ctr']}|{r['conversions']}|{campaign}|{grp}"
         )
     return "\n".join(lines)
 
@@ -177,7 +176,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_message},
@@ -211,7 +210,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
   "new_ads": [{"type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","text":"","target_campaign":"","target_asset_group":"","appeal_axis":"","reason":""}]
 }"""
     retry_response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": (
                 "あなたはJSONフォーマッターです。"

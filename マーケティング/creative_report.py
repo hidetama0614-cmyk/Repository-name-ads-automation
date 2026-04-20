@@ -121,16 +121,15 @@ PERFORMANCE_LABEL_MAP = {
 
 def _format_for_claude(rows: list[dict]) -> str:
     lines = [
-        "以下はGoogle検索広告の広告アセット（見出し・説明文）の直近30日間の実績データです。分析をお願いします。\n",
-        "| 種別 | テキスト | パフォーマンスラベル | 表示回数 | クリック数 | 費用(円) | CTR(%) | CV数 | キャンペーン | 広告グループ |",
-        "| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- | :--- |",
+        "検索広告アセット直近30日実績。分析してください。",
+        "種別|テキスト|ラベル|表示回数|クリック|費用|CTR|CV|キャンペーン|広告グループ",
     ]
     for r in rows:
-        label = PERFORMANCE_LABEL_MAP.get(r["performance_label"], r["performance_label"])
+        label    = PERFORMANCE_LABEL_MAP.get(r["performance_label"], r["performance_label"])
+        campaign = r["campaign"][:20]
+        ad_group = r["ad_group"][:20]
         lines.append(
-            f"| {r['field_type']} | {r['text']} | {label} "
-            f"| {r['impressions']:,} | {r['clicks']:,} | {r['cost']:,} "
-            f"| {r['ctr']} | {r['conversions']} | {r['campaign']} | {r['ad_group']} |"
+            f"{r['field_type']}|{r['text']}|{label}|{r['impressions']}|{r['clicks']}|{r['cost']}|{r['ctr']}|{r['conversions']}|{campaign}|{ad_group}"
         )
     return "\n".join(lines)
 
@@ -146,7 +145,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_message},
@@ -180,7 +179,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
   "new_ads": [{"type":"HEADLINE or DESCRIPTION","text":"","target_campaign":"","target_ad_group":"","appeal_axis":"","reason":""}]
 }"""
     retry_response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": (
                 "あなたはJSONフォーマッターです。"
