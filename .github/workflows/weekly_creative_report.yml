@@ -24,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: 依存関係をインストール
-        run: pip install google-ads gspread google-auth python-dotenv requests google-generativeai
+        run: pip install google-ads gspread google-auth python-dotenv requests google-genai
 
       - name: サービスアカウントJSONを復元
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json

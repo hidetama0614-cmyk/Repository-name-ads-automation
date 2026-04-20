@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
 from google.ads.googleads.client import GoogleAdsClient
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from fetch_ad_creatives import fetch_ad_asset_performance
 
@@ -144,12 +145,15 @@ def analyze_with_claude(rows: list[dict]) -> dict:
     system_prompt = CREATIVE_ANALYST_PROMPT
     user_message  = _format_for_claude(rows)
 
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=system_prompt,
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=user_message,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=8192,
+        ),
     )
-    response = model.generate_content(user_message)
     raw_text = response.text
 
     # 1回目：そのままパース
@@ -176,18 +180,21 @@ def analyze_with_claude(rows: list[dict]) -> dict:
   "winning": [{"text":"","field_type":"HEADLINE or DESCRIPTION","campaign":"","ad_group":"","appeal_axis":"","reason":"","next_action":""}],
   "new_ads": [{"type":"HEADLINE or DESCRIPTION","text":"","target_campaign":"","target_ad_group":"","appeal_axis":"","reason":""}]
 }"""
-    retry_model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=(
-            "あなたはJSONフォーマッターです。"
-            "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
-            "前置き・説明・コードブロック記法は一切含めないでください。"
+    retry_response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=(
+            f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
+            f"## 必要なJSON形式\n{json_schema}\n\n"
+            f"## 変換対象の分析テキスト\n{raw_text}"
         ),
-    )
-    retry_response = retry_model.generate_content(
-        f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
-        f"## 必要なJSON形式\n{json_schema}\n\n"
-        f"## 変換対象の分析テキスト\n{raw_text}"
+        config=types.GenerateContentConfig(
+            system_instruction=(
+                "あなたはJSONフォーマッターです。"
+                "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
+                "前置き・説明・コードブロック記法は一切含めないでください。"
+            ),
+            max_output_tokens=8192,
+        ),
     )
     retry_raw = retry_response.text
     rs = retry_raw.find("{")
