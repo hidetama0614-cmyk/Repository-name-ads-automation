@@ -177,7 +177,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
 
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama-3.1-8b-instant",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_message},
@@ -211,7 +211,7 @@ def analyze_with_claude(rows: list[dict]) -> dict:
   "new_ads": [{"type":"HEADLINE/LONG_HEADLINE/DESCRIPTION","text":"","target_campaign":"","target_asset_group":"","appeal_axis":"","reason":""}]
 }"""
     retry_response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama-3.1-8b-instant",
         messages=[
             {"role": "system", "content": (
                 "あなたはJSONフォーマッターです。"
