@@ -317,27 +317,20 @@ def _format_slack_message(analysis: dict, today: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _get_or_create_spreadsheet(gc) -> tuple:
-    """P-MAX専用スプレッドシートを取得または新規作成する。(sh, spreadsheet_id) を返す。"""
+    """P-MAX専用スプレッドシートを取得する。(sh, spreadsheet_id) を返す。"""
     spreadsheet_id = config.get("pmax_log_spreadsheet_id", "")
 
-    if spreadsheet_id:
-        sh = gc.open_by_key(spreadsheet_id)
-        return sh, spreadsheet_id
+    if not spreadsheet_id:
+        print("\n【設定エラー】config.json の pmax_log_spreadsheet_id が未設定です。")
+        print("以下の手順でスプレッドシートIDを設定してください：")
+        print("  1. Googleスプレッドシートを新規作成する")
+        print("  2. サービスアカウントのメールアドレスを編集者として共有する")
+        print("  3. URLの /d/〇〇〇/ の部分（〇〇〇）をコピーする")
+        print("  4. config.json の pmax_log_spreadsheet_id に貼り付ける")
+        raise SystemExit(1)
 
-    # 新規作成（Driveフォルダに配置）
-    folder_id = config.get("drive_folder_id", "")
-    if folder_id:
-        sh = gc.create(PMAX_SPREADSHEET_TITLE, folder_id=folder_id)
-    else:
-        sh = gc.create(PMAX_SPREADSHEET_TITLE)
-
-    new_id = sh.id
-    print(f"\n★ 新規スプレッドシートを作成しました")
-    print(f"  ID: {new_id}")
-    print(f"  URL: https://docs.google.com/spreadsheets/d/{new_id}")
-    print(f"  → config.json の pmax_log_spreadsheet_id にこのIDを設定してください\n")
-
-    return sh, new_id
+    sh = gc.open_by_key(spreadsheet_id)
+    return sh, spreadsheet_id
 
 
 def _get_or_create_worksheet(sh, title: str, rows: int = 2000, cols: int = 15):
