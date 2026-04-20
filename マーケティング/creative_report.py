@@ -18,8 +18,7 @@ from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
 from google.ads.googleads.client import GoogleAdsClient
-from google import genai
-from google.genai import types
+from groq import Groq
 
 from fetch_ad_creatives import fetch_ad_asset_performance
 
@@ -145,16 +144,16 @@ def analyze_with_claude(rows: list[dict]) -> dict:
     system_prompt = CREATIVE_ANALYST_PROMPT
     user_message  = _format_for_claude(rows)
 
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=user_message,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=8192,
-        ),
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_message},
+        ],
+        max_tokens=8192,
     )
-    raw_text = response.text
+    raw_text = response.choices[0].message.content
 
     # 1回目：そのままパース
     try:
@@ -180,23 +179,23 @@ def analyze_with_claude(rows: list[dict]) -> dict:
   "winning": [{"text":"","field_type":"HEADLINE or DESCRIPTION","campaign":"","ad_group":"","appeal_axis":"","reason":"","next_action":""}],
   "new_ads": [{"type":"HEADLINE or DESCRIPTION","text":"","target_campaign":"","target_ad_group":"","appeal_axis":"","reason":""}]
 }"""
-    retry_response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=(
-            f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
-            f"## 必要なJSON形式\n{json_schema}\n\n"
-            f"## 変換対象の分析テキスト\n{raw_text}"
-        ),
-        config=types.GenerateContentConfig(
-            system_instruction=(
+    retry_response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": (
                 "あなたはJSONフォーマッターです。"
                 "与えられたテキストを指定のJSON形式に変換し、JSONオブジェクトのみを出力してください。"
                 "前置き・説明・コードブロック記法は一切含めないでください。"
-            ),
-            max_output_tokens=8192,
-        ),
+            )},
+            {"role": "user", "content": (
+                f"以下の分析テキストを、このJSON形式に変換してください。\n\n"
+                f"## 必要なJSON形式\n{json_schema}\n\n"
+                f"## 変換対象の分析テキスト\n{raw_text}"
+            )},
+        ],
+        max_tokens=8192,
     )
-    retry_raw = retry_response.text
+    retry_raw = retry_response.choices[0].message.content
     rs = retry_raw.find("{")
     re_ = retry_raw.rfind("}")
     if rs != -1 and re_ > rs:
