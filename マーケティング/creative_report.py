@@ -10,12 +10,10 @@ creative_report.py — 広告クリエイティブの週次レポートを生成
 """
 
 import os
-import re
 import json
 import time
 import requests
 from datetime import date
-from pathlib import Path
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
@@ -43,14 +41,69 @@ DIVIDER = "━━━━━━━━━━━━━━━━━━━━━"
 
 
 # ---------------------------------------------------------------------------
-# 1. エージェントプロンプトの読み込み
+# 1. エージェントプロンプト（インライン埋め込み）
 # ---------------------------------------------------------------------------
 
-def _load_agent_prompt(agent_name: str) -> str:
-    path = Path(__file__).parent.parent / ".claude" / "agents" / f"{agent_name}.md"
-    content = path.read_text(encoding="utf-8")
-    content = re.sub(r"^---.*?---\s*", "", content, flags=re.DOTALL)
-    return content.strip()
+CREATIVE_ANALYST_PROMPT = """【重要】あなたの返答は必ず有効なJSONオブジェクトのみで構成してください。`{` で始まり `}` で終わること。前置き・見出し・マークダウン・コードブロック記法（```）は一切含めないでください。
+
+あなたはD2C領域の運用型広告において、クリエイティブの摩耗と勝ちパターンを的確に見抜く優秀なアナリストです。
+提供された広告見出し・説明文の配信データ（インプレッション、CTR、CPA、CV数など）を読み解き、以下のルールに従って分析レポートを作成してください。
+
+# 分析・判断ルール
+1. **停止判断（摩耗・負けクリエイティブの特定）:**
+   - 十分なインプレッションがあるにも関わらずCTRが著しく低い、またはCPAが高騰している見出し・説明文を特定してください。
+   - 各アセットに「高・中・低」の重要度を付与してください（すぐに停止すべきものは「高」）。
+   - 課題・要因仮説・改善提案をセットで記載してください。改善提案は抽象的でなく、そのまま広告に使える具体的なテキストレベルで記載してください。
+2. **勝ち筋の言語化（ベストクリエイティブの特定）:**
+   - CTRが高く、安定してCVを獲得しているクリエイティブに共通する訴求軸を言語化してください。なぜそのターゲットに刺さったのか、心理的背景も短く考察してください。
+3. **次の一手（テスト仮説の立案）:**
+   - 次に検証すべき仮説を3つ立て、それぞれにそのまま使える具体的な広告文案を添えてください。
+
+# 出力形式
+必ず以下のJSON形式のみで出力してください。JSON以外のテキスト（前置き・解説・コードブロック記法など）は一切含めないでください。
+
+{
+  "conclusion": "今週全体の結論（2〜3文。最も重要なアクションと勝ちパターンを端的にまとめる）",
+  "stop": [
+    {
+      "text": "対象の広告テキスト（完全な文言をそのまま記載）",
+      "field_type": "HEADLINE または DESCRIPTION",
+      "campaign": "キャンペーン名（データから正確に抜き出す）",
+      "ad_group": "広告グループ名（データから正確に抜き出す）",
+      "importance": "高 または 中 または 低",
+      "action_type": "停止 または 修正",
+      "issue": "課題の説明（1文）",
+      "operation": "管理画面での具体的な操作指示（例：このアセットを無効化する）",
+      "improved_copy": "改善後のテキスト（停止の場合は代替案、修正の場合は修正後テキスト。文字数制限を守ること）"
+    }
+  ],
+  "winning": [
+    {
+      "text": "対象の広告テキスト（完全な文言をそのまま記載）",
+      "field_type": "HEADLINE または DESCRIPTION",
+      "campaign": "キャンペーン名（データから正確に抜き出す）",
+      "ad_group": "広告グループ名（データから正確に抜き出す）",
+      "appeal_axis": "訴求軸（例：価格、権威性、共感など）",
+      "reason": "なぜ刺さっているか（1文）",
+      "next_action": "この勝ちパターンをどう横展開・強化するか（具体的なアクション）"
+    }
+  ],
+  "new_ads": [
+    {
+      "type": "HEADLINE または DESCRIPTION",
+      "text": "そのまま入稿できる広告文（文字数制限を必ず守ること：見出し15文字以内、説明文45文字以内）",
+      "target_campaign": "追加先のキャンペーン名",
+      "target_ad_group": "追加先の広告グループ名",
+      "appeal_axis": "訴求軸",
+      "reason": "追加する理由（1文）",
+      "operation": "管理画面での操作指示（例：〇〇広告グループの広告編集画面で見出し欄に追加）"
+    }
+  ]
+}
+
+## 重要ルール
+- 同一テキストが複数のキャンペーン・広告グループに存在する場合、必ずそれぞれ個別のエントリとして出力する。まとめたり「複数」「計〇件」などと表現することは禁止。
+- campaign / ad_group はデータに記載された名称をそのまま使用する。省略・要約禁止。"""
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +141,7 @@ def _format_for_claude(rows: list[dict]) -> str:
 
 def analyze_with_claude(rows: list[dict]) -> dict:
     """creative-analyst エージェントで分析し、JSONとして返す。"""
-    system_prompt = _load_agent_prompt("creative-analyst")
+    system_prompt = CREATIVE_ANALYST_PROMPT
     user_message  = _format_for_claude(rows)
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
