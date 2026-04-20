@@ -494,7 +494,7 @@ def main():
     write_raw_sheet(sh, rows)
 
     print("Claude（pmax-analyst）で分析中...")
-    analysis_rows = sorted(rows, key=lambda r: r["cost"], reverse=True)[:150]
+    analysis_rows = sorted(rows, key=lambda r: r["cost"], reverse=True)[:50]
     analysis = analyze_with_claude(analysis_rows)
     print("  → 分析完了")
 
