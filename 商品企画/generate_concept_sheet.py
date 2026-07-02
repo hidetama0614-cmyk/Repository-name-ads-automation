@@ -51,7 +51,7 @@ from datetime import date
 import openpyxl
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_PATH = os.path.join(BASE_DIR, "template", "商品コンセプトシート_フォーマット.xlsx")
+TEMPLATE_PATH = os.path.join(BASE_DIR, "商品コンセプトシート_フォーマット.xlsx")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
 # 競合①〜⑤の開始行（各6行で1ブロック）
